@@ -9,38 +9,40 @@ import pickle
 import logging
 import base64
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from io import BytesIO
 from PIL import Image
 import uvicorn
 from dotenv import load_dotenv
 
-# Load environment variables from .env file (for local use)
 load_dotenv()
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# File paths from environment variables with defaults
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(SCRIPT_DIR, "trained_features", "keras", "rl_jewelry_model.keras")
-SCALER_PATH = os.path.join(SCRIPT_DIR, "trained_features", "scaler.pkl")
-PAIRWISE_FEATURES_PATH = os.path.join(SCRIPT_DIR, "trained_features", "pandas", "pairwise_features.npy")
+MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras")
+SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl")
+PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
 
-# FastAPI app setup
 app = FastAPI(
     title="Jewelry Compatibility Predictor",
     description="Predict compatibility between base64-encoded face and jewelry images and get top 10 recommendations.",
     version="1.0.0"
 )
 
-# Input model for API
 class PredictInput(BaseModel):
     face_base64: str
     jewelry_base64: str
 
-# Predictor class
+    @validator("face_base64", "jewelry_base64")
+    def validate_base64(cls, value):
+        try:
+            # Check if it's a valid base64 string by attempting to decode it
+            base64.b64decode(value, validate=True)
+            return value
+        except Exception as e:
+            raise ValueError(f"Invalid base64 string: {str(e)}")
+
 class JewelryRLPredictor:
     def __init__(self, model_path, scaler_path, pairwise_features_path):
         logger.info(f"Current working directory: {os.getcwd()}")
@@ -108,7 +110,6 @@ class JewelryRLPredictor:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Prediction processing error: {str(e)}")
 
-# Initialize predictor
 try:
     predictor = JewelryRLPredictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
 except Exception as e:
@@ -117,7 +118,6 @@ except Exception as e:
 
 @app.post("/predict", summary="Predict jewelry compatibility with base64 images")
 async def predict(request: Request, input_data: PredictInput):
-    """Predict compatibility and return top 10 jewelry recommendations using base64-encoded images."""
     try:
         face_base64 = input_data.face_base64
         jewelry_base64 = input_data.jewelry_base64
@@ -129,8 +129,8 @@ async def predict(request: Request, input_data: PredictInput):
         try:
             face_data = base64.b64decode(face_base64)
             jewelry_data = base64.b64decode(jewelry_base64)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail="Invalid base64 string provided")
+        except base64.binascii.Error as e:
+            raise HTTPException(status_code=400, detail=f"Base64 decoding error: {str(e)}")
         
         logger.info(f"Face data size: {len(face_data)} bytes, Jewelry data size: {len(jewelry_data)} bytes")
         
