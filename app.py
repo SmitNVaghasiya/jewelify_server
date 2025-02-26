@@ -20,9 +20,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras")
-SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl")
-PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+# Normalize paths to use forward slashes
+MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras").replace("\\", "/")
+SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl").replace("\\", "/")
+PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy").replace("\\", "/")
 
 app = FastAPI(
     title="Jewelry Compatibility Predictor",
@@ -37,7 +38,6 @@ class PredictInput(BaseModel):
     @validator("face_base64", "jewelry_base64")
     def validate_base64(cls, value):
         try:
-            # Check if it's a valid base64 string by attempting to decode it
             base64.b64decode(value, validate=True)
             return value
         except Exception as e:
@@ -46,9 +46,9 @@ class PredictInput(BaseModel):
 class JewelryRLPredictor:
     def __init__(self, model_path, scaler_path, pairwise_features_path):
         logger.info(f"Current working directory: {os.getcwd()}")
-        logger.info(f"Checking for model at: {model_path}")
-        logger.info(f"Checking for scaler at: {scaler_path}")
-        logger.info(f"Checking for pairwise features at: {pairwise_features_path}")
+        logger.info(f"Model path resolved to: {model_path}")
+        logger.info(f"Scaler path resolved to: {scaler_path}")
+        logger.info(f"Pairwise features path resolved to: {pairwise_features_path}")
         
         missing_files = [p for p in [model_path, scaler_path, pairwise_features_path] if not os.path.exists(p)]
         if missing_files:
