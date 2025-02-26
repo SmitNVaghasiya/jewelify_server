@@ -1,4 +1,5 @@
 import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Suppress TensorFlow warnings
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
@@ -20,7 +21,6 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Normalize paths to use forward slashes
 MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras").replace("\\", "/")
 SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl").replace("\\", "/")
 PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy").replace("\\", "/")
