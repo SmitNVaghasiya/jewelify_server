@@ -74,18 +74,25 @@ class JewelryRLPredictor:
         self.jewelry_features = np.array(list(self.pairwise_features.values()))
 
     def extract_features(self, img_data):
+        logger.info("Extracting features from image data...")
         try:
             img = Image.open(BytesIO(img_data)).convert("RGB").resize(self.img_size, Image.Resampling.LANCZOS)
+            logger.info("Image opened and resized successfully")
             img_array = preprocess_input(np.expand_dims(image.img_to_array(img), axis=0))
+            logger.info("Image preprocessed for inference")
             features = self.feature_extractor.predict(img_array, verbose=0)
+            logger.info("Features extracted from model")
             return self.scaler.transform(features)
         except Exception as e:
+            logger.error(f"Feature extraction failed: {str(e)}")
             raise HTTPException(status_code=400, detail=f"Image processing error: {str(e)}")
 
     def predict_compatibility(self, face_data, jewel_data):
+        logger.info("Starting compatibility prediction...")
         try:
             face_features = self.extract_features(face_data)
             jewel_features = self.extract_features(jewel_data)
+            logger.info("Features extracted for both images")
             
             similarity = np.dot(face_features, jewel_features.T).flatten()[0]
             score = (similarity + 1) / 2.0
@@ -97,6 +104,7 @@ class JewelryRLPredictor:
                 "Bad" if score >= 0.2 else
                 "Very Bad"
             )
+            logger.info(f"Computed score: {score}, category: {category}")
             
             recommendation_scores = (np.dot(face_features, self.jewelry_features.T).flatten() + 1) / 2.0
             recommendation_scores = np.clip(recommendation_scores, 0, 1)
@@ -105,9 +113,11 @@ class JewelryRLPredictor:
                 {"name": self.jewelry_names[i], "score": float(recommendation_scores[i])}
                 for i in top_10_indices
             ]
+            logger.info("Recommendations computed")
             
             return score, category, recommendations
         except Exception as e:
+            logger.error(f"Prediction failed: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Prediction processing error: {str(e)}")
 
 try:
@@ -118,6 +128,7 @@ except Exception as e:
 
 @app.post("/predict", summary="Predict jewelry compatibility with base64 images")
 async def predict(request: Request, input_data: PredictInput):
+    logger.info("Received POST /predict request")
     try:
         face_base64 = input_data.face_base64
         jewelry_base64 = input_data.jewelry_base64
@@ -129,10 +140,10 @@ async def predict(request: Request, input_data: PredictInput):
         try:
             face_data = base64.b64decode(face_base64)
             jewelry_data = base64.b64decode(jewelry_base64)
+            logger.info(f"Decoded face data: {len(face_data)} bytes, jewelry data: {len(jewelry_data)} bytes")
         except base64.binascii.Error as e:
+            logger.error(f"Base64 decoding error: {str(e)}")
             raise HTTPException(status_code=400, detail=f"Base64 decoding error: {str(e)}")
-        
-        logger.info(f"Face data size: {len(face_data)} bytes, Jewelry data size: {len(jewelry_data)} bytes")
         
         if not face_data or not jewelry_data:
             raise HTTPException(status_code=400, detail="Decoded images are empty or invalid")
