@@ -23,9 +23,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 # File paths from environment variables with defaults
-MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras")
-SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl")
-PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(SCRIPT_DIR, "trained_features", "keras", "rl_jewelry_model.keras")
+SCALER_PATH = os.path.join(SCRIPT_DIR, "trained_features", "scaler.pkl")
+PAIRWISE_FEATURES_PATH = os.path.join(SCRIPT_DIR, "trained_features", "pandas", "pairwise_features.npy")
 
 # FastAPI app setup
 app = FastAPI(
