@@ -10,7 +10,7 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
 db = client["jewelify_db"]
-predictions_collection = db["predictions"]
+predictions_collection = db["recommendations"]
 images_collection = db["images"]
 
 def save_prediction(score, category, recommendations):
