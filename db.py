@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Global MongoDB client
-MONGO_URI = os.getenv("MONGO_URI")
+# MONGO_URI = os.getenv("MONGO_URI")
+MONGO_URI = 'mongodb+srv://jewelify:jewelify123@jewelify-cluster.ueqyg.mongodb.net/?retryWrites=true&w=majority&appName=jewelify-cluster'
+
 if not MONGO_URI:
     logger.error("🚨 MONGO_URI not found in environment variables")
     client = None
