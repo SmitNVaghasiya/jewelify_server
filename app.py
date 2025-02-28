@@ -96,6 +96,10 @@ except Exception as e:
 # ---------------------- FastAPI App ----------------------
 app = FastAPI()
 
+@app.get('/')
+async def home():
+    return{"Message": 'Welcome to home page'}
+
 @app.post("/predict")
 async def predict(
     face: UploadFile = File(...),  # Required file upload
