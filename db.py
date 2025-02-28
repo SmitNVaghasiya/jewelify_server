@@ -2,6 +2,11 @@ import os
 from pymongo import MongoClient
 from datetime import datetime
 from dotenv import load_dotenv
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -9,21 +14,21 @@ load_dotenv()
 # Global MongoDB client
 MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:
-    print("🚨 MONGO_URI not found in environment variables")
+    logger.error("🚨 MONGO_URI not found in environment variables")
     client = None
 else:
     try:
         client = MongoClient(MONGO_URI)
         client.admin.command('ping')  # Test connection
-        print("✅ Successfully connected to MongoDB Atlas!")
+        logger.info("✅ Successfully connected to MongoDB Atlas!")
     except Exception as e:
-        print(f"🚨 Failed to connect to MongoDB Atlas: {e}")
+        logger.error(f"🚨 Failed to connect to MongoDB Atlas: {e}")
         client = None
 
 def save_prediction(score, category, recommendations):
     """Save prediction to MongoDB and return the inserted _id as a string"""
     if not client:
-        print("❌ No MongoDB client available")
+        logger.error("❌ No MongoDB client available")
         return None
 
     try:
@@ -36,14 +41,16 @@ def save_prediction(score, category, recommendations):
             "timestamp": datetime.utcnow().isoformat()
         }
         result = collection.insert_one(prediction)
+        logger.info(f"✅ Saved prediction with ID: {result.inserted_id}")
         return str(result.inserted_id)
     except Exception as e:
-        print(f"❌ Error saving prediction to MongoDB: {e}")
+        logger.error(f"❌ Error saving prediction to MongoDB: {e}")
         return None
 
 def get_all_predictions():
     """Retrieve all predictions with image URLs"""
     if not client:
+        logger.error("❌ Database connection error")
         return {"error": "Database connection error"}
 
     try:
@@ -54,6 +61,7 @@ def get_all_predictions():
         # Get all predictions
         predictions = list(predictions_collection.find().sort("timestamp", -1))
         if not predictions:
+            logger.warning("⚠️ No predictions found")
             return {"error": "No predictions found"}
 
         results = []
@@ -68,13 +76,15 @@ def get_all_predictions():
                     image_data.append({"name": name, "url": None})
 
             results.append({
+                "id": str(prediction["_id"]),  # Added prediction ID
                 "score": prediction["score"],
                 "category": prediction["category"],
                 "recommendations": image_data,
                 "timestamp": prediction["timestamp"]
             })
 
+        logger.info(f"✅ Retrieved {len(results)} predictions")
         return results
     except Exception as e:
-        print(f"❌ Error retrieving predictions from MongoDB: {e}")
+        logger.error(f"❌ Error retrieving predictions from MongoDB: {e}")
         return {"error": str(e)}
