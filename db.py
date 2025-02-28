@@ -2,19 +2,41 @@ import os
 from pymongo import MongoClient
 from datetime import datetime
 from dotenv import load_dotenv
+import ssl
+from bson.objectid import ObjectId
 
 # Load environment variables
 load_dotenv()
 
-# MongoDB connection
+# MongoDB connection with SSL/TLS configuration
 MONGO_URI = os.getenv("MONGO_URI")
-client = MongoClient(MONGO_URI)
-db = client["jewelify"]
-predictions_collection = db["recommendations"]
-images_collection = db["images"]
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = True
+ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+try:
+    client = MongoClient(MONGO_URI, ssl=ssl_context, serverSelectionTimeoutMS=5000)
+    client.admin.command('ping')  # Test connection
+    print("✅ Successfully connected to MongoDB Atlas!")
+except Exception as e:
+    print(f"🚨 Failed to connect to MongoDB Atlas: {e}")
+    client = None
+
+if client:
+    db = client["jewelify_db"]
+    predictions_collection = db["recommendations"]
+    images_collection = db["images"]
+else:
+    db = None
+    predictions_collection = None
+    images_collection = None
 
 def save_prediction(score, category, recommendations):
-    """Save prediction to MongoDB"""
+    """Save prediction to MongoDB and return the inserted _id as a string"""
+    if not predictions_collection:
+        print("❌ MongoDB client not initialized")
+        return None
+
     try:
         prediction = {
             "score": score,
@@ -23,13 +45,17 @@ def save_prediction(score, category, recommendations):
             "timestamp": datetime.utcnow().isoformat()
         }
         result = predictions_collection.insert_one(prediction)
-        return str(result.inserted_id)  # Return the inserted ID
+        return str(result.inserted_id)  # Return the _id as a string
     except Exception as e:
         print(f"❌ Error saving prediction to MongoDB: {e}")
         return None
 
 def get_latest_prediction():
     """Retrieve the latest prediction with image URLs"""
+    if not predictions_collection:
+        print("❌ MongoDB client not initialized")
+        return None
+
     try:
         # Get the most recent prediction
         prediction = predictions_collection.find().sort("timestamp", -1).limit(1)[0]

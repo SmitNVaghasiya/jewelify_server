@@ -5,11 +5,12 @@ from dotenv import load_dotenv
 import uvicorn
 from predictor import get_predictor, predict_compatibility
 from db import save_prediction, get_latest_prediction
+import ssl
 
 # Load environment variables
 load_dotenv()
 
-# Define paths using environment variables
+# Define paths using environment variables with defaults
 MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras")
 SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl")
 PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
@@ -34,20 +35,28 @@ async def predict(
     # Reinitialize predictor if None
     if predictor is None:
         print("⚠️ Predictor is None, attempting to reinitialize...")
-        predictor = get_predictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
-        if predictor is None:
+        try:
+            predictor = get_predictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
+            if predictor is None:
+                raise Exception("Predictor reinitialization failed")
+        except Exception as e:
+            print(f"🚨 Failed to reinitialize JewelryRLPredictor: {e}")
             return JSONResponse(content={"error": "Model is not loaded properly"}, status_code=500)
 
     # Read uploaded image files
-    face_data = await face.read()
-    jewelry_data = await jewelry.read()
+    try:
+        face_data = await face.read()
+        jewelry_data = await jewelry.read()
+    except Exception as e:
+        print(f"❌ Error reading uploaded files: {e}")
+        return JSONResponse(content={"error": "Failed to read uploaded images"}, status_code=400)
 
     # Perform prediction
     score, category, recommendations = predict_compatibility(predictor, face_data, jewelry_data)
     if score is None:
         return JSONResponse(content={"error": "Prediction failed"}, status_code=500)
 
-    # Save to MongoDB
+    # Save to MongoDB and get prediction_id
     prediction_id = save_prediction(float(score), category, recommendations)
     if prediction_id is None:
         print("⚠️ Failed to save prediction to MongoDB, but returning response anyway")
@@ -56,7 +65,7 @@ async def predict(
         "score": float(score),
         "category": category,
         "recommendations": recommendations,
-        "prediction_id": prediction_id  # Optional: return ID for reference
+        "prediction_id": prediction_id  # Now includes the MongoDB _id as a string or None
     }
 
 @app.get("/get_predictions")
