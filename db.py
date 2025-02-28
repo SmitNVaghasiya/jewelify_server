@@ -9,7 +9,7 @@ load_dotenv()
 # MongoDB connection
 MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
-db = client["jewelify_db"]
+db = client["jewelify"]
 predictions_collection = db["recommendations"]
 images_collection = db["images"]
 
