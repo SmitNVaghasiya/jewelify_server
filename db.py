@@ -12,15 +12,13 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Global MongoDB client
-# MONGO_URI = os.getenv("MONGO_URI")
-MONGO_URI = 'mongodb+srv://jewelify:jewelify123@jewelify-cluster.ueqyg.mongodb.net/?retryWrites=true&w=majority&tls=true&appName=jewelify-cluster'
-
+MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:
     logger.error("🚨 MONGO_URI not found in environment variables")
     client = None
 else:
     try:
-        client = MongoClient(MONGO_URI, tlsAllowInvalidCertificates=True)
+        client = MongoClient(MONGO_URI)
         client.admin.command('ping')  # Test connection
         logger.info("✅ Successfully connected to MongoDB Atlas!")
     except Exception as e:
@@ -34,7 +32,7 @@ def rebuild_client():
         logger.error("🚨 Cannot rebuild client: MONGO_URI not found")
         return False
     try:
-        client = MongoClient(MONGO_URI, tlsAllowInvalidCertificates=True)
+        client = MongoClient(MONGO_URI)
         client.admin.command('ping')  # Test connection
         logger.info("✅ Successfully rebuilt MongoDB client")
         return True

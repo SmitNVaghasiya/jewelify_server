@@ -1,12 +1,21 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import uvicorn
-from pymongo import MongoClient  # Import MongoClient directly here for simplicity
+from predictor import get_predictor, predict_compatibility
+from db import save_prediction, get_all_predictions
 
 # Load environment variables
 load_dotenv()
+
+# Define paths using environment variables with defaults
+MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras")
+SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl")
+PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+
+# Initialize predictor globally
+predictor = get_predictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
 
 # FastAPI app
 app = FastAPI()
@@ -15,52 +24,61 @@ app = FastAPI()
 async def home():
     return {"Message": "Welcome to Jewelify home page"}
 
+@app.post("/predict")
+async def predict(
+    face: UploadFile = File(...),  # Required file upload
+    jewelry: UploadFile = File(...)  # Required file upload
+):
+    global predictor
+
+    # Reinitialize predictor if None
+    if predictor is None:
+        print("⚠️ Predictor is None, attempting to reinitialize...")
+        try:
+            predictor = get_predictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
+            if predictor is None:
+                raise Exception("Predictor reinitialization failed")
+        except Exception as e:
+            print(f"🚨 Failed to reinitialize JewelryRLPredictor: {e}")
+            raise HTTPException(status_code=500, detail="Model is not loaded properly")
+
+    # Validate file types
+    if not face.content_type.startswith('image/') or not jewelry.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="Uploaded files must be images")
+
+    # Read uploaded image files
+    try:
+        face_data = await face.read()
+        jewelry_data = await jewelry.read()
+    except Exception as e:
+        print(f"❌ Error reading uploaded files: {e}")
+        raise HTTPException(status_code=400, detail="Failed to read uploaded images")
+
+    # Perform prediction
+    score, category, recommendations = predict_compatibility(predictor, face_data, jewelry_data)
+    if score is None:
+        raise HTTPException(status_code=500, detail="Prediction failed")
+
+    # Save to MongoDB and get prediction_id
+    prediction_id = save_prediction(score, category, recommendations)
+    if prediction_id is None:
+        print("⚠️ Failed to save prediction to MongoDB, but returning response anyway")
+
+    return {
+        "score": score,
+        "category": category,
+        "recommendations": recommendations,
+        "prediction_id": prediction_id
+    }
+
 @app.get("/get_predictions")
 async def get_predictions():
     """Retrieve all predictions with image URLs"""
-    try:
-        # Get MongoDB URI from environment variables
-        # MONGO_URI = os.getenv("MONGO_URI")
-        MONGO_URI = 'mongodb+srv://jewelify:jewelify123@jewelify-cluster.ueqyg.mongodb.net/?retryWrites=true&w=majority&tls=true&appName=jewelify-cluster'
-        if not MONGO_URI:
-            return JSONResponse(content={"error": "MONGO_URI not found in environment variables"}, status_code=500)
-
-        # Connect to MongoDB
-        client = MongoClient(MONGO_URI, tlsAllowInvalidCertificates=True)
-        db = client["jewelify"]
-        collection = db["recommendations"]
-        images_collection = db["images"]
-
-        # Get all predictions
-        predictions = list(collection.find().sort("timestamp", -1))
-        if not predictions:
-            client.close()
-            return JSONResponse(content={"error": "No predictions found"}, status_code=404)
-
-        results = []
-        for prediction in predictions:
-            recommendations = prediction.get("recommendations", [])
-            image_data = []
-            for name in recommendations:
-                image_doc = images_collection.find_one({"name": name})
-                if image_doc:
-                    image_data.append({"name": name, "url": image_doc["url"]})
-                else:
-                    image_data.append({"name": name, "url": None})  # Handle missing images
-
-            results.append({
-                "score": prediction.get("score"),
-                "category": prediction.get("category"),
-                "recommendations": image_data,
-                "timestamp": prediction.get("timestamp")
-            })
-
-        client.close()  # Close the connection
-        return results
-
-    except Exception as e:
-        print(f"\u274c Error retrieving predictions from MongoDB: {e}")
-        return JSONResponse(content={"error": f"Database error: {str(e)}"}, status_code=500)
+    result = get_all_predictions()
+    if "error" in result:
+        status_code = 500 if result["error"] != "No predictions found" else 404
+        raise HTTPException(status_code=status_code, detail=result["error"])
+    return result
 
 # Run the app
 if __name__ == "__main__":
