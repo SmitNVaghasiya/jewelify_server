@@ -87,7 +87,7 @@ class JewelryRLPredictor:
 
         return scaled_score, category, recommendations
 
-# Initialize predictor
+# Initialize predictor globally
 try:
     predictor = JewelryRLPredictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
 except Exception as e:
@@ -102,8 +102,17 @@ async def predict(
     face: UploadFile = File(...),  # Required file upload
     jewelry: UploadFile = File(...)  # Required file upload
 ):
+    global predictor  # Access the global predictor variable
+
+    # Check if predictor is None and attempt to rebuild it
     if predictor is None:
-        return JSONResponse(content={"error": "Model is not loaded properly"}, status_code=500)
+        print("⚠️ Predictor is None, attempting to reinitialize...")
+        try:
+            predictor = JewelryRLPredictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
+            print("✅ Predictor reinitialized successfully!")
+        except Exception as e:
+            print(f"🚨 Failed to reinitialize JewelryRLPredictor: {e}")
+            return JSONResponse(content={"error": "Model is not loaded properly"}, status_code=500)
 
     # Read uploaded image files
     face_data = await face.read()
