@@ -21,12 +21,12 @@ async def get_predictions():
     try:
         # Get MongoDB URI from environment variables
         # MONGO_URI = os.getenv("MONGO_URI")
-        MONGO_URI = 'mongodb+srv://jewelify:jewelify123@jewelify-cluster.ueqyg.mongodb.net/?retryWrites=true&w=majority&appName=jewelify-cluster'
+        MONGO_URI = 'mongodb+srv://jewelify:jewelify123@jewelify-cluster.ueqyg.mongodb.net/?retryWrites=true&w=majority&tls=true&appName=jewelify-cluster'
         if not MONGO_URI:
             return JSONResponse(content={"error": "MONGO_URI not found in environment variables"}, status_code=500)
 
         # Connect to MongoDB
-        client = MongoClient(MONGO_URI)
+        client = MongoClient(MONGO_URI, tlsAllowInvalidCertificates=True)
         db = client["jewelify"]
         collection = db["recommendations"]
         images_collection = db["images"]
