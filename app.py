@@ -1,10 +1,10 @@
 import os
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import uvicorn
 from predictor import get_predictor, predict_compatibility
-from db import save_prediction, get_latest_prediction
+from db import save_prediction, get_all_predictions
 
 # Load environment variables
 load_dotenv()
@@ -40,7 +40,11 @@ async def predict(
                 raise Exception("Predictor reinitialization failed")
         except Exception as e:
             print(f"🚨 Failed to reinitialize JewelryRLPredictor: {e}")
-            return JSONResponse(content={"error": "Model is not loaded properly"}, status_code=500)
+            raise HTTPException(status_code=500, detail="Model is not loaded properly")
+
+    # Validate file types
+    if not face.content_type.startswith('image/') or not jewelry.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="Uploaded files must be images")
 
     # Read uploaded image files
     try:
@@ -48,12 +52,12 @@ async def predict(
         jewelry_data = await jewelry.read()
     except Exception as e:
         print(f"❌ Error reading uploaded files: {e}")
-        return JSONResponse(content={"error": "Failed to read uploaded images"}, status_code=400)
+        raise HTTPException(status_code=400, detail="Failed to read uploaded images")
 
     # Perform prediction
     score, category, recommendations = predict_compatibility(predictor, face_data, jewelry_data)
     if score is None:
-        return JSONResponse(content={"error": "Prediction failed"}, status_code=500)
+        raise HTTPException(status_code=500, detail="Prediction failed")
 
     # Save to MongoDB and get prediction_id
     prediction_id = save_prediction(score, category, recommendations)
@@ -61,19 +65,19 @@ async def predict(
         print("⚠️ Failed to save prediction to MongoDB, but returning response anyway")
 
     return {
-        "score": score,  # Already a float, no need to cast
+        "score": score,
         "category": category,
         "recommendations": recommendations,
-        "prediction_id": prediction_id  # MongoDB _id as a string or None
+        "prediction_id": prediction_id
     }
 
 @app.get("/get_predictions")
 async def get_predictions():
-    """Retrieve the latest prediction with image URLs"""
-    result = get_latest_prediction()
-    if result is None or "error" in result:
-        error_msg = result.get("error", "No predictions found or database error") if result else "No predictions found or database error"
-        return JSONResponse(content={"error": error_msg}, status_code=500)
+    """Retrieve all predictions with image URLs"""
+    result = get_all_predictions()
+    if "error" in result:
+        status_code = 500 if result["error"] != "No predictions found" else 404
+        raise HTTPException(status_code=status_code, detail=result["error"])
     return result
 
 # Run the app
