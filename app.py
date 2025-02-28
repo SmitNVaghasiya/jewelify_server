@@ -1,5 +1,4 @@
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Suppress TensorFlow warnings
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
@@ -7,160 +6,121 @@ from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.models import load_model, Model
 import pickle
-import logging
-import base64
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, validator
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import JSONResponse
 from io import BytesIO
-from PIL import Image
 import uvicorn
-from dotenv import load_dotenv
 
-load_dotenv()
+# Define Paths using environment variables with defaults
+MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras")
+SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl")
+PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger(__name__)
-
-MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras").replace("\\", "/")
-SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl").replace("\\", "/")
-PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy").replace("\\", "/")
-
-app = FastAPI(
-    title="Jewelry Compatibility Predictor",
-    description="Predict compatibility between base64-encoded face and jewelry images and get top 10 recommendations.",
-    version="1.0.0"
-)
-
-class PredictInput(BaseModel):
-    face_base64: str
-    jewelry_base64: str
-
-    @validator("face_base64", "jewelry_base64")
-    def validate_base64(cls, value):
-        try:
-            base64.b64decode(value, validate=True)
-            return value
-        except Exception as e:
-            raise ValueError(f"Invalid base64 string: {str(e)}")
-
+# ---------------------- Jewelry RL Predictor ----------------------
 class JewelryRLPredictor:
     def __init__(self, model_path, scaler_path, pairwise_features_path):
-        logger.info(f"Current working directory: {os.getcwd()}")
-        logger.info(f"Model path resolved to: {model_path}")
-        logger.info(f"Scaler path resolved to: {scaler_path}")
-        logger.info(f"Pairwise features path resolved to: {pairwise_features_path}")
-        
-        missing_files = [p for p in [model_path, scaler_path, pairwise_features_path] if not os.path.exists(p)]
-        if missing_files:
-            error_msg = f"Missing files: {', '.join(missing_files)}"
-            logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
-        
-        logger.info("Loading model...")
+        for path in [model_path, scaler_path, pairwise_features_path]:
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Missing required file: {path}")
+
+        print("🚀 Loading model...")
         self.model = load_model(model_path)
         self.img_size = (224, 224)
-        
-        logger.info("Loading scaler...")
+        self.feature_size = 1280
+        self.device = "/GPU:0" if tf.config.list_physical_devices('GPU') else "/CPU:0"
+
+        print("📏 Loading scaler...")
         with open(scaler_path, 'rb') as f:
             self.scaler = pickle.load(f)
-        
-        logger.info("Initializing feature extractor...")
+
+        print("🔄 Setting up MobileNetV2 feature extractor...")
         base_model = MobileNetV2(weights="imagenet", include_top=False, input_shape=(224, 224, 3))
-        self.feature_extractor = Model(inputs=base_model.input, outputs=tf.keras.layers.GlobalAveragePooling2D()(base_model.output))
-        
-        logger.info("Loading pairwise features...")
+        global_avg_layer = tf.keras.layers.GlobalAveragePooling2D()
+        reduction_layer = tf.keras.layers.Dense(self.feature_size, activation="relu")
+        self.feature_extractor = Model(
+            inputs=base_model.input,
+            outputs=reduction_layer(global_avg_layer(base_model.output))
+        )
+
+        print("📂 Loading pairwise features...")
         self.pairwise_features = np.load(pairwise_features_path, allow_pickle=True).item()
+        self.pairwise_features = {
+            k: self.scaler.transform(np.array(v).reshape(1, -1))
+            for k, v in self.pairwise_features.items() if v is not None and v.size == 1280
+        }
+        self.jewelry_list = list(self.pairwise_features.values())
         self.jewelry_names = list(self.pairwise_features.keys())
-        self.jewelry_features = np.array(list(self.pairwise_features.values()))
+        print("✅ Predictor initialized successfully!")
 
     def extract_features(self, img_data):
-        logger.info("Extracting features from image data...")
+        """Extract features from an image file"""
         try:
-            img = Image.open(BytesIO(img_data)).convert("RGB").resize(self.img_size, Image.Resampling.LANCZOS)
-            logger.info("Image opened and resized successfully")
-            img_array = preprocess_input(np.expand_dims(image.img_to_array(img), axis=0))
-            logger.info("Image preprocessed for inference")
+            img = image.load_img(BytesIO(img_data), target_size=self.img_size)
+            img_array = image.img_to_array(img)
+            img_array = np.expand_dims(img_array, axis=0)
+            img_array = preprocess_input(img_array)
             features = self.feature_extractor.predict(img_array, verbose=0)
-            logger.info("Features extracted from model")
             return self.scaler.transform(features)
         except Exception as e:
-            logger.error(f"Feature extraction failed: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"Image processing error: {str(e)}")
+            print(f"❌ Error extracting features: {e}")
+            return None
 
     def predict_compatibility(self, face_data, jewel_data):
-        logger.info("Starting compatibility prediction...")
-        try:
-            face_features = self.extract_features(face_data)
-            jewel_features = self.extract_features(jewel_data)
-            logger.info("Features extracted for both images")
-            
-            similarity = np.dot(face_features, jewel_features.T).flatten()[0]
-            score = (similarity + 1) / 2.0
-            score = max(0, min(score, 1))
-            category = (
-                "Very Good" if score >= 0.8 else
-                "Good" if score >= 0.6 else
-                "Neutral" if score >= 0.4 else
-                "Bad" if score >= 0.2 else
-                "Very Bad"
-            )
-            logger.info(f"Computed score: {score}, category: {category}")
-            
-            recommendation_scores = (np.dot(face_features, self.jewelry_features.T).flatten() + 1) / 2.0
-            recommendation_scores = np.clip(recommendation_scores, 0, 1)
-            top_10_indices = np.argsort(recommendation_scores)[::-1][:10]
-            recommendations = [
-                {"name": self.jewelry_names[i], "score": float(recommendation_scores[i])}
-                for i in top_10_indices
-            ]
-            logger.info("Recommendations computed")
-            
-            return score, category, recommendations
-        except Exception as e:
-            logger.error(f"Prediction failed: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Prediction processing error: {str(e)}")
+        """Predict compatibility between a face and jewelry"""
+        face_features = self.extract_features(face_data)
+        jewel_features = self.extract_features(jewel_data)
+        if face_features is None or jewel_features is None:
+            return None, "Feature extraction failed", []
 
+        # Normalize and compute cosine similarity
+        face_norm = face_features / np.linalg.norm(face_features, axis=1, keepdims=True)
+        jewel_norm = jewel_features / np.linalg.norm(jewel_features, axis=1, keepdims=True)
+        cosine_similarity = np.sum(face_norm * jewel_norm, axis=1)[0]
+        scaled_score = (cosine_similarity + 1) / 2.0
+        category = "🌟 Very Good" if scaled_score >= 0.8 else "✅ Good" if scaled_score >= 0.6 else "😐 Neutral" if scaled_score >= 0.4 else "⚠️ Bad" if scaled_score >= 0.2 else "❌ Very Bad"
+
+        with tf.device(self.device):
+            q_values = self.model.predict(face_features, verbose=0)[0]
+        top_indices = np.argsort(q_values)[::-1]
+        top_recommendations = [(self.jewelry_names[idx], q_values[idx]) for idx in top_indices[:10]]
+        recommendations = [name for name, _ in top_recommendations]
+
+        return scaled_score, category, recommendations
+
+# Initialize predictor
 try:
     predictor = JewelryRLPredictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
 except Exception as e:
-    logger.error(f"Failed to initialize predictor: {str(e)}")
-    raise
+    print(f"🚨 Failed to initialize JewelryRLPredictor: {e}")
+    predictor = None
 
-@app.post("/predict", summary="Predict jewelry compatibility with base64 images")
-async def predict(request: Request, input_data: PredictInput):
-    logger.info("Received POST /predict request")
-    try:
-        face_base64 = input_data.face_base64
-        jewelry_base64 = input_data.jewelry_base64
-        
-        if not face_base64 or not jewelry_base64:
-            raise HTTPException(status_code=400, detail="Both face and jewelry base64 strings are required")
-        
-        logger.info("Decoding base64 images...")
-        try:
-            face_data = base64.b64decode(face_base64)
-            jewelry_data = base64.b64decode(jewelry_base64)
-            logger.info(f"Decoded face data: {len(face_data)} bytes, jewelry data: {len(jewelry_data)} bytes")
-        except base64.binascii.Error as e:
-            logger.error(f"Base64 decoding error: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"Base64 decoding error: {str(e)}")
-        
-        if not face_data or not jewelry_data:
-            raise HTTPException(status_code=400, detail="Decoded images are empty or invalid")
+# ---------------------- FastAPI App ----------------------
+app = FastAPI()
 
-        score, category, recommendations = predictor.predict_compatibility(face_data, jewelry_data)
-        
-        logger.info("Prediction successful")
-        return {"score": score, "category": category, "recommendations": recommendations}
-    
-    except HTTPException as e:
-        logger.error(f"HTTP error: {str(e)}")
-        raise e
-    except Exception as e:
-        logger.error(f"Unexpected error in /predict: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+@app.post("/predict")
+async def predict(
+    face: UploadFile = File(...),  # Required file upload
+    jewelry: UploadFile = File(...)  # Required file upload
+):
+    if predictor is None:
+        return JSONResponse(content={"error": "Model is not loaded properly"}, status_code=500)
 
+    # Read uploaded image files
+    face_data = await face.read()
+    jewelry_data = await jewelry.read()
+
+    # Perform prediction
+    score, category, recommendations = predictor.predict_compatibility(face_data, jewelry_data)
+    if score is None:
+        return JSONResponse(content={"error": "Prediction failed"}, status_code=500)
+
+    return {
+        "score": float(score),
+        "category": category,
+        "recommendations": recommendations
+    }
+
+# ---------------------- Run the App ----------------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    logger.info(f"Starting server on port {port}")
+    port = int(os.environ.get("PORT", 5000))  # Render sets PORT; default to 5000
     uvicorn.run(app, host="0.0.0.0", port=port)
