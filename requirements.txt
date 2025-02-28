@@ -5,3 +5,4 @@ numpy==1.26.4
 pillow==11.1.0
 python-multipart==0.0.20
 nest_asyncio==1.6.0
+python-dotenv==1.0.1

@@ -72,7 +72,6 @@ class JewelryRLPredictor:
         if face_features is None or jewel_features is None:
             return None, "Feature extraction failed", []
 
-        # Normalize and compute cosine similarity
         face_norm = face_features / np.linalg.norm(face_features, axis=1, keepdims=True)
         jewel_norm = jewel_features / np.linalg.norm(jewel_features, axis=1, keepdims=True)
         cosine_similarity = np.sum(face_norm * jewel_norm, axis=1)[0]
@@ -104,7 +103,7 @@ async def predict(
 ):
     global predictor  # Access the global predictor variable
 
-    # Check if predictor is None and attempt to rebuild it
+    # Check if predictor is None and attempt to reinitialize
     if predictor is None:
         print("⚠️ Predictor is None, attempting to reinitialize...")
         try:
