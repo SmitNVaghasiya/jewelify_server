@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 import uvicorn
 from predictor import get_predictor, predict_compatibility
 from db import save_prediction, get_latest_prediction
-import ssl
 
 # Load environment variables
 load_dotenv()
@@ -57,23 +56,24 @@ async def predict(
         return JSONResponse(content={"error": "Prediction failed"}, status_code=500)
 
     # Save to MongoDB and get prediction_id
-    prediction_id = save_prediction(float(score), category, recommendations)
+    prediction_id = save_prediction(score, category, recommendations)
     if prediction_id is None:
         print("⚠️ Failed to save prediction to MongoDB, but returning response anyway")
 
     return {
-        "score": float(score),
+        "score": score,  # Already a float, no need to cast
         "category": category,
         "recommendations": recommendations,
-        "prediction_id": prediction_id  # Now includes the MongoDB _id as a string or None
+        "prediction_id": prediction_id  # MongoDB _id as a string or None
     }
 
 @app.get("/get_predictions")
 async def get_predictions():
     """Retrieve the latest prediction with image URLs"""
     result = get_latest_prediction()
-    if result is None:
-        return JSONResponse(content={"error": "No predictions found or database error"}, status_code=500)
+    if result is None or "error" in result:
+        error_msg = result.get("error", "No predictions found or database error") if result else "No predictions found or database error"
+        return JSONResponse(content={"error": error_msg}, status_code=500)
     return result
 
 # Run the app
