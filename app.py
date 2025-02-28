@@ -20,7 +20,8 @@ async def get_predictions():
     """Retrieve all predictions with image URLs"""
     try:
         # Get MongoDB URI from environment variables
-        MONGO_URI = os.getenv("MONGO_URI")
+        # MONGO_URI = os.getenv("MONGO_URI")
+        MONGO_URI = 'mongodb+srv://jewelify:jewelify123@jewelify-cluster.ueqyg.mongodb.net/?retryWrites=true&w=majority&appName=jewelify-cluster'
         if not MONGO_URI:
             return JSONResponse(content={"error": "MONGO_URI not found in environment variables"}, status_code=500)
 
