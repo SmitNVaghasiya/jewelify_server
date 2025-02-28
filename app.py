@@ -4,7 +4,8 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import uvicorn
 from predictor import get_predictor, predict_compatibility
-from db import save_prediction, get_all_predictions
+from db import save_prediction, get_prediction_by_id, get_all_predictions
+from bson import ObjectId
 
 # Load environment variables
 load_dotenv()
@@ -65,11 +66,23 @@ async def predict(
         print("⚠️ Failed to save prediction to MongoDB, but returning response anyway")
 
     return {
+        "prediction_id": prediction_id,
         "score": score,
         "category": category,
         "recommendations": recommendations,
-        "prediction_id": prediction_id
     }
+
+@app.get("/get_prediction/{prediction_id}")
+async def get_prediction(prediction_id: str):
+    """Retrieve a single prediction by ID"""
+    try:
+        result = get_prediction_by_id(prediction_id)
+        if "error" in result:
+            status_code = 404 if result["error"] == "Prediction not found" else 500
+            raise HTTPException(status_code=status_code, detail=result["error"])
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid prediction ID: {str(e)}")
 
 @app.get("/get_predictions")
 async def get_predictions():
