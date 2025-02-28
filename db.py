@@ -25,11 +25,29 @@ else:
         logger.error(f"🚨 Failed to connect to MongoDB Atlas: {e}")
         client = None
 
+def rebuild_client():
+    """Attempt to rebuild the MongoDB client if it is None or fails."""
+    global client, MONGO_URI
+    if not MONGO_URI:
+        logger.error("🚨 Cannot rebuild client: MONGO_URI not found")
+        return False
+    try:
+        client = MongoClient(MONGO_URI)
+        client.admin.command('ping')  # Test connection
+        logger.info("✅ Successfully rebuilt MongoDB client")
+        return True
+    except Exception as e:
+        logger.error(f"🚨 Failed to rebuild MongoDB client: {e}")
+        return False
+
 def save_prediction(score, category, recommendations):
     """Save prediction to MongoDB and return the inserted _id as a string"""
+    global client
     if not client:
-        logger.error("❌ No MongoDB client available")
-        return None
+        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        if not rebuild_client():
+            logger.error("❌ Failed to rebuild MongoDB client, cannot save prediction")
+            return None
 
     try:
         db = client["jewelify"]
@@ -49,9 +67,12 @@ def save_prediction(score, category, recommendations):
 
 def get_all_predictions():
     """Retrieve all predictions with image URLs"""
+    global client
     if not client:
-        logger.error("❌ Database connection error")
-        return {"error": "Database connection error"}
+        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        if not rebuild_client():
+            logger.error("❌ Failed to rebuild MongoDB client, cannot retrieve predictions")
+            return {"error": "Database connection error"}
 
     try:
         db = client["jewelify"]
@@ -76,7 +97,7 @@ def get_all_predictions():
                     image_data.append({"name": name, "url": None})
 
             results.append({
-                "id": str(prediction["_id"]),  # Added prediction ID
+                "id": str(prediction["_id"]),
                 "score": prediction["score"],
                 "category": prediction["category"],
                 "recommendations": image_data,
