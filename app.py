@@ -73,7 +73,7 @@ def get_all_predictions():
     """Retrieve all predictions with image URLs"""
     global client
     if not client:
-        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        logger.warning(f"⚠️ No MongoDB client available, attempting to rebuild {MONGO_URI}")
         if not rebuild_client():
             logger.error("❌ Failed to rebuild MongoDB client, cannot retrieve predictions")
             return {"error": "Database connection error"}
