@@ -9,7 +9,3 @@ python-dotenv==1.0.1
 pydantic==2.10.6
 scikit-learn==1.6.1
 pymongo[srv]==4.11.1
-passlib[bcrypt]==1.7.4
-python-jose==3.3.0
-pyyaml==6.0.1  # Added: For configuration management
-requests==2.31.0  # Added: For HTTP requests (optional)

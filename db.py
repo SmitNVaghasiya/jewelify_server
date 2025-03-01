@@ -1,5 +1,5 @@
-from pymongo import MongoClient
 import os
+from pymongo import MongoClient
 from datetime import datetime
 from dotenv import load_dotenv
 import logging
@@ -11,37 +11,39 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
-MONGO_URI = os.getenv("MONGO_URI")
-client = None
 
-def get_db_client():
-    global client
-    if client is None:
-        try:
-            client = MongoClient(MONGO_URI)
-            client.admin.command('ping')
-            logger.info("✅ Successfully connected to MongoDB Atlas!")
-        except Exception as e:
-            logger.error(f"🚨 Failed to connect to MongoDB Atlas: {e}")
-            client = None
-    return client
+# Global MongoDB client
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    logger.error("🚨 MONGO_URI not found in environment variables")
+    client = None
+else:
+    try:
+        client = MongoClient(MONGO_URI)
+        client.admin.command('ping')  # Test connection
+        logger.info("✅ Successfully connected to MongoDB Atlas!")
+    except Exception as e:
+        logger.error(f"🚨 Failed to connect to MongoDB Atlas: {e}")
+        client = None
 
 def rebuild_client():
+    """Attempt to rebuild the MongoDB client if it is None or fails."""
     global client, MONGO_URI
     if not MONGO_URI:
         logger.error("🚨 Cannot rebuild client: MONGO_URI not found")
         return False
     try:
         client = MongoClient(MONGO_URI)
-        client.admin.command('ping')
+        client.admin.command('ping')  # Test connection
         logger.info("✅ Successfully rebuilt MongoDB client")
         return True
     except Exception as e:
         logger.error(f"🚨 Failed to rebuild MongoDB client: {e}")
         return False
 
-def save_prediction(score, category, recommendations, user_id):
-    client = get_db_client()
+def save_prediction(score, category, recommendations):
+    """Save prediction to MongoDB and return the inserted _id as a string"""
+    global client
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
         if not rebuild_client():
@@ -52,7 +54,6 @@ def save_prediction(score, category, recommendations, user_id):
         db = client["jewelify"]
         collection = db["recommendations"]
         prediction = {
-            "user_id": ObjectId(user_id),
             "score": score,
             "category": category,
             "recommendations": recommendations,
@@ -66,7 +67,8 @@ def save_prediction(score, category, recommendations, user_id):
         return None
 
 def get_prediction_by_id(prediction_id):
-    client = get_db_client()
+    """Retrieve a single prediction by its ID with image URLs"""
+    global client
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
         if not rebuild_client():
@@ -107,7 +109,8 @@ def get_prediction_by_id(prediction_id):
         return {"error": str(e)}
 
 def get_all_predictions():
-    client = get_db_client()
+    """Retrieve all predictions with image URLs"""
+    global client
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
         if not rebuild_client():
@@ -119,6 +122,7 @@ def get_all_predictions():
         predictions_collection = db["recommendations"]
         images_collection = db["images"]
 
+        # Get all predictions
         predictions = list(predictions_collection.find().sort("timestamp", -1))
         if not predictions:
             logger.warning("⚠️ No predictions found")
