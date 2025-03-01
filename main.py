@@ -115,10 +115,10 @@ def get_all_predictions():
         logger.error(f"❌ Error retrieving predictions from MongoDB: {e}")
         return {"error": str(e)}
 
-MODEL_DIR = "models"  # Directory for predictor files
-MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(MODEL_DIR, "rl_jewelry_model.keras"))
-SCALER_PATH = os.getenv("SCALER_PATH", os.path.join(MODEL_DIR, "scaler.pkl"))
-PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", os.path.join(MODEL_DIR, "pairwise_features.npy"))
+# Define paths using environment variables with defaults
+MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras")
+SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl")
+PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
 
 # Initialize predictor globally
 predictor = get_predictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
