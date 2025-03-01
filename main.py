@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import uvicorn
 from predictor import get_predictor, predict_compatibility
+from db import get_prediction_by_id
 from pymongo import MongoClient
 from datetime import datetime
 import logging
@@ -114,10 +115,10 @@ def get_all_predictions():
         logger.error(f"❌ Error retrieving predictions from MongoDB: {e}")
         return {"error": str(e)}
 
-# Define paths using environment variables with defaults
-MODEL_PATH = os.getenv("MODEL_PATH", "rl_jewelry_model.keras")
-SCALER_PATH = os.getenv("SCALER_PATH", "scaler.pkl")
-PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+MODEL_DIR = "models"  # Directory for predictor files
+MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(MODEL_DIR, "rl_jewelry_model.keras"))
+SCALER_PATH = os.getenv("SCALER_PATH", os.path.join(MODEL_DIR, "scaler.pkl"))
+PAIRWISE_FEATURES_PATH = os.getenv("PAIRWISE_FEATURES_PATH", os.path.join(MODEL_DIR, "pairwise_features.npy"))
 
 # Initialize predictor globally
 predictor = get_predictor(MODEL_PATH, SCALER_PATH, PAIRWISE_FEATURES_PATH)
@@ -183,6 +184,13 @@ async def get_predictions():
     if "error" in result:
         status_code = 500 if result["error"] != "No predictions found" else 404
         raise HTTPException(status_code=status_code, detail=result["error"])
+    return result
+
+@app.get("/get_prediction/{prediction_id}")
+async def get_prediction(prediction_id: str):
+    result = get_prediction_by_id(prediction_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
     return result
 
 # Run the app
