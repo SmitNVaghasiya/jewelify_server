@@ -44,7 +44,6 @@ class JewelryRLPredictor:
         print("✅ Predictor initialized successfully!")
 
     def extract_features(self, img_data):
-        """Extract features from an image file"""
         try:
             img = image.load_img(BytesIO(img_data), target_size=self.img_size)
             img_array = image.img_to_array(img)
@@ -57,7 +56,6 @@ class JewelryRLPredictor:
             return None
 
     def predict_compatibility(self, face_data, jewel_data):
-        """Predict compatibility between a face and jewelry"""
         face_features = self.extract_features(face_data)
         jewel_features = self.extract_features(jewel_data)
         if face_features is None or jewel_features is None:
@@ -78,7 +76,6 @@ class JewelryRLPredictor:
         return scaled_score, category, recommendations
 
 def get_predictor(model_path, scaler_path, pairwise_features_path):
-    """Initialize and return a JewelryRLPredictor instance"""
     try:
         predictor = JewelryRLPredictor(model_path, scaler_path, pairwise_features_path)
         return predictor
@@ -87,7 +84,6 @@ def get_predictor(model_path, scaler_path, pairwise_features_path):
         return None
 
 def predict_compatibility(predictor, face_data, jewelry_data):
-    """Wrapper for predict_compatibility method"""
     if predictor is None:
         return None, "Predictor not initialized", []
     return predictor.predict_compatibility(face_data, jewelry_data)

@@ -9,3 +9,5 @@ python-dotenv==1.0.1
 pydantic==2.10.6
 scikit-learn==1.6.1
 pymongo[srv]==4.11.1
+passlib[bcrypt]
+python-jose
