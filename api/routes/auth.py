@@ -62,11 +62,13 @@ async def register(user: UserRegister):
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to create user: " + str(e))
     
+    access_token = create_access_token(data={"sub": str(result.inserted_id)})
     return {
         "id": str(result.inserted_id),
         "username": user.username,
         "mobileNo": user.mobileNo,
-        "created_at": user_data["created_at"]
+        "created_at": user_data["created_at"],
+        "access_token": access_token
     }
 
 @router.post("/login")
