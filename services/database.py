@@ -54,7 +54,7 @@ def save_prediction(score, category, recommendations, user_id=None):
         prediction = {
             "score": score,
             "category": category,
-            "recommendations": recommendations,
+            "recommendations": recommendations,  # Expected as list of strings or dicts
             "timestamp": datetime.utcnow().isoformat()
         }
         if user_id:
@@ -96,12 +96,20 @@ def get_prediction_by_id(prediction_id):
 
         recommendations = prediction.get("recommendations", [])
         image_data = []
-        for name in recommendations:
-            image_doc = images_collection.find_one({"name": name})
-            image_data.append({
-                "name": name,
-                "url": image_doc["url"] if image_doc and "url" in image_doc else None
-            })
+        for item in recommendations:
+            if isinstance(item, str):
+                image_doc = images_collection.find_one({"name": item})
+                image_data.append({
+                    "name": item,
+                    "url": image_doc["url"] if image_doc and "url" in image_doc else None
+                })
+            elif isinstance(item, dict) and "name" in item:
+                image_data.append({
+                    "name": item["name"],
+                    "url": item.get("url", None)
+                })
+            else:
+                image_data.append({"name": str(item), "url": None})
 
         result = {
             "id": str(prediction["_id"]),
@@ -139,12 +147,20 @@ def get_all_predictions():
         for prediction in predictions:
             recommendations = prediction.get("recommendations", [])
             image_data = []
-            for name in recommendations:
-                image_doc = images_collection.find_one({"name": name})
-                if image_doc:
-                    image_data.append({"name": name, "url": image_doc["url"]})
+            for item in recommendations:
+                if isinstance(item, str):
+                    image_doc = images_collection.find_one({"name": item})
+                    image_data.append({
+                        "name": item,
+                        "url": image_doc["url"] if image_doc and "url" in image_doc else None
+                    })
+                elif isinstance(item, dict) and "name" in item:
+                    image_data.append({
+                        "name": item["name"],
+                        "url": item.get("url", None)
+                    })
                 else:
-                    image_data.append({"name": name, "url": None})
+                    image_data.append({"name": str(item), "url": None})
 
             results.append({
                 "id": str(prediction["_id"]),
