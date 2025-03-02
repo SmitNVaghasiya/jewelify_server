@@ -11,5 +11,8 @@ scikit-learn==1.6.1
 pymongo[srv]==4.11.1
 passlib[bcrypt]==1.7.4
 python-jose==3.3.0
-pyyaml==6.0.1  # For configuration management
-requests==2.31.0  # For HTTP requests (optional)
+pyyaml==6.0.1
+requests==2.31.0
+
+# Ensure bcrypt is compatible with passlib
+bcrypt==3.2.0
