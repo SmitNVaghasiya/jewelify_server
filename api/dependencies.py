@@ -3,9 +3,10 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from bson import ObjectId
 from services.database import get_db_client
+import os
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-SECRET_KEY = "67c5d8cdc2c70e444d913cf46d6938e4a7574436d302f9063dae3fea50e52430"  # From .env
+SECRET_KEY = os.getenv("SECRET_KEY", "67c5d8cdc2c70e444d913cf46d6938e4a7574436d302f9063dae3fea50e52430")
 ALGORITHM = "HS256"
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
@@ -21,9 +22,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    client = get_db_client()
-    db = client["jewelify"]
-    user = db["users"].find_one({"_id": ObjectId(user_id)})
+    try:
+        client = get_db_client()
+        db = client["jewelify"]
+        user = db["users"].find_one({"_id": ObjectId(user_id)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
     if user is None:
         raise credentials_exception
     return user

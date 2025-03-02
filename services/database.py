@@ -1,8 +1,8 @@
-from pymongo import MongoClient
 import os
+import logging
+from pymongo import MongoClient
 from datetime import datetime
 from dotenv import load_dotenv
-import logging
 from bson import ObjectId
 
 # Configure logging
@@ -40,7 +40,7 @@ def rebuild_client():
         logger.error(f"🚨 Failed to rebuild MongoDB client: {e}")
         return False
 
-def save_prediction(score, category, recommendations, user_id):
+def save_prediction(score, category, recommendations, user_id=None):
     client = get_db_client()
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
@@ -52,12 +52,18 @@ def save_prediction(score, category, recommendations, user_id):
         db = client["jewelify"]
         collection = db["recommendations"]
         prediction = {
-            "user_id": ObjectId(user_id),
             "score": score,
             "category": category,
             "recommendations": recommendations,
             "timestamp": datetime.utcnow().isoformat()
         }
+        if user_id:
+            try:
+                prediction["user_id"] = ObjectId(user_id)
+            except Exception as e:
+                logger.error(f"Invalid user_id format: {e}")
+                return None
+
         result = collection.insert_one(prediction)
         logger.info(f"✅ Saved prediction with ID: {result.inserted_id}")
         return str(result.inserted_id)
@@ -78,7 +84,12 @@ def get_prediction_by_id(prediction_id):
         predictions_collection = db["recommendations"]
         images_collection = db["images"]
 
-        prediction = predictions_collection.find_one({"_id": ObjectId(prediction_id)})
+        try:
+            prediction = predictions_collection.find_one({"_id": ObjectId(prediction_id)})
+        except Exception as e:
+            logger.error(f"Invalid prediction_id format: {e}")
+            return {"error": "Invalid prediction ID format"}
+
         if not prediction:
             logger.warning(f"⚠️ Prediction with ID {prediction_id} not found")
             return {"error": "Prediction not found"}

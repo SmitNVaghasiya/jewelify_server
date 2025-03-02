@@ -6,7 +6,7 @@ class UserRegister(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     mobileNo: str = Field(..., min_length=10, max_length=15)
     password: str = Field(..., min_length=6)
-    otp: str = Field(..., min_length=4, max_length=6)
+    otp: str = Field(..., min_length=6, max_length=6)
 
     @validator("mobileNo")
     def validate_mobile(cls, v):

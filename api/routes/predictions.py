@@ -34,13 +34,21 @@ async def predict(
         face_data = await face.read()
         jewelry_data = await jewelry.read()
     except Exception as e:
-        raise HTTPException(status_code=400, detail="Failed to read uploaded images")
+        raise HTTPException(status_code=400, detail="Failed to read uploaded images: " + str(e))
 
-    score, category, recommendations = predict_compatibility(predictor, face_data, jewelry_data)
+    try:
+        score, category, recommendations = predict_compatibility(predictor, face_data, jewelry_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Prediction error: " + str(e))
+    
     if score is None:
         raise HTTPException(status_code=500, detail="Prediction failed")
 
-    prediction_id = save_prediction(score, category, recommendations, str(current_user["_id"]))
+    try:
+        prediction_id = save_prediction(score, category, recommendations, str(current_user["_id"]))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to save prediction: " + str(e))
+    
     return {
         "prediction_id": prediction_id,
         "score": score,
@@ -51,7 +59,11 @@ async def predict(
 @router.get("/get_prediction/{prediction_id}")
 async def get_prediction(prediction_id: str):
     from services.database import get_prediction_by_id
-    result = get_prediction_by_id(prediction_id)
+    try:
+        result = get_prediction_by_id(prediction_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    
     if "error" in result:
         status_code = 404 if result["error"] == "Prediction not found" else 500
         raise HTTPException(status_code=status_code, detail=result["error"])
@@ -60,8 +72,12 @@ async def get_prediction(prediction_id: str):
 @router.get("/get_predictions")
 async def get_predictions():
     from services.database import get_all_predictions
-    result = get_all_predictions()
+    try:
+        result = get_all_predictions()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    
     if "error" in result:
         status_code = 500 if result["error"] != "No predictions found" else 404
         raise HTTPException(status_code=status_code, detail=result["error"])
-    return result
+    return result 
