@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from models.user import UserRegister, UserOut
-from services.auth import hash_password, create_access_token
+from services.auth import hash_password, create_access_token, verify_password
 from services.database import get_db_client
 from datetime import datetime
 import os
@@ -89,7 +89,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     except Exception as e:
         raise HTTPException(status_code=500, detail="Database query error: " + str(e))
     
-    if not user or hash_password(form_data.password) != user.get("hashed_password"):
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(status_code=400, detail="Incorrect username/mobileNo or password")
 
     try:
