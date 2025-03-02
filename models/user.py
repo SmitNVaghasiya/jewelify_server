@@ -10,8 +10,12 @@ class UserRegister(BaseModel):
 
     @validator("mobileNo")
     def validate_mobile(cls, v):
-        if not v.isdigit():
-            raise ValueError("Mobile number must contain only digits")
+    # Option 1: Allow a leading plus, then digits
+        import re
+        if not re.match(r"^\+?\d+$", v):
+            raise ValueError("Mobile number must contain only digits (optionally with a leading +)")
+        return v
+
         return v
 
 class UserLogin(BaseModel):
