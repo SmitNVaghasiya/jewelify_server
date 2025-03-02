@@ -52,7 +52,7 @@ async def predict(
     return {
         "prediction_id": prediction_id,
         "score": score,
-        "category": category,
+        "category": category,  # This will now contain Unicode emoji codes
         "recommendations": recommendations,
     }
 
@@ -80,4 +80,4 @@ async def get_predictions():
     if "error" in result:
         status_code = 500 if result["error"] != "No predictions found" else 404
         raise HTTPException(status_code=status_code, detail=result["error"])
-    return result 
+    return result

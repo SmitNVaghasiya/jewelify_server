@@ -70,17 +70,19 @@ class JewelryRLPredictor:
         cosine_similarity = np.sum(face_norm * jewel_norm, axis=1)[0]
         scaled_score = (cosine_similarity + 1) / 2.0
 
-        # Assign categories based on score
+        # Assign categories based on score with emoji codes
         if scaled_score >= 0.8:
-            category = "🌟 Very Good"
+            category = "\u2728 Very Good"  # 🌟 (U+2728)
         elif scaled_score >= 0.6:
-            category = "✅ Good"
+            category = "\u2705 Good"  # ✅ (U+2705)
         elif scaled_score >= 0.4:
-            category = "😐 Neutral"
+            category = "\u2639 Neutral"  # 😐 (U+2639, simpler neutral face)
         elif scaled_score >= 0.2:
-            category = "⚠️ Bad"
+            category = "\u26A0 Bad"  # ⚠️ (U+26A0)
         else:
-            category = "❌ Very Bad"
+            category = "\u274C Very Bad"  # ❌ (U+274C)
+
+        print(f"Category with emoji code: {category}")  # Debug print to verify
 
         # Get recommendations from RL model
         with tf.device(self.device):
