@@ -7,6 +7,12 @@ from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.models import load_model, Model
 import pickle
 from io import BytesIO
+from pymongo import MongoClient
+from bson.objectid import ObjectId
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class JewelryRLPredictor:
     def __init__(self, model_path, scaler_path, pairwise_features_path):
@@ -71,16 +77,27 @@ class JewelryRLPredictor:
         scaled_score = (cosine_similarity + 1) / 2.0
 
         # Assign categories based on score with emoji codes
+        # if scaled_score >= 0.8:
+        #     category = "\u2728 Very Good"  # 🌟 (U+2728)
+        # elif scaled_score >= 0.6:
+        #     category = "\u2705 Good"  # ✅ (U+2705)
+        # elif scaled_score >= 0.4:
+        #     category = "\u2639 Neutral"  # 😐 (U+2639, simpler neutral face)
+        # elif scaled_score >= 0.2:
+        #     category = "\u26A0 Bad"  # ⚠️ (U+26A0)
+        # else:
+        #     category = "\u274C Very Bad"  # ❌ (U+274C)
+
         if scaled_score >= 0.8:
-            category = "\u2728 Very Good"  # 🌟 (U+2728)
+            category = "Very Good"  # 🌟 (U+2728)
         elif scaled_score >= 0.6:
-            category = "\u2705 Good"  # ✅ (U+2705)
+            category = "Good"  # ✅ (U+2705)
         elif scaled_score >= 0.4:
-            category = "\u2639 Neutral"  # 😐 (U+2639, simpler neutral face)
+            category = "Neutral"  # 😐 (U+2639, simpler neutral face)
         elif scaled_score >= 0.2:
-            category = "\u26A0 Bad"  # ⚠️ (U+26A0)
+            category = "Bad"  # ⚠️ (U+26A0)
         else:
-            category = "\u274C Very Bad"  # ❌ (U+274C)
+            category = "Very Bad"  # ❌ (U+274C)
 
         print(f"Category with emoji code: {category}")  # Debug print to verify
 
@@ -98,15 +115,51 @@ class JewelryRLPredictor:
         recommendations = [name for name, _ in top_recommendations]
 
         return scaled_score, category, recommendations
+    
+def get_db_client():
+    # Your MongoDB client setup logic here
+    return MongoClient("mongodb://localhost:27017/")  # Adjust as needed
 
-def get_predictor(model_path, scaler_path, pairwise_features_path):
-    """Initialize and return a JewelryRLPredictor instance."""
+def get_all_predictions(user_id):
+    client = get_db_client()
+    if not client:
+        logger.error("Failed to connect to MongoDB")
+        return {"error": "Database connection error"}
+
     try:
-        predictor = JewelryRLPredictor(model_path, scaler_path, pairwise_features_path)
-        return predictor
+        db = client["jewelify"]
+        predictions_collection = db["recommendations"]
+        images_collection = db["images"]
+
+        predictions = list(predictions_collection.find({"user_id": ObjectId(user_id)}).sort("timestamp", -1))
+        if not predictions:
+            logger.warning(f"No predictions found for user {user_id}")
+            return {"error": "No predictions found"}
+
+        results = []
+        for prediction in predictions:
+            recommendations = prediction.get("recommendations", [])
+            image_data = []
+            for name in recommendations:
+                image_doc = images_collection.find_one({"name": name})
+                image_data.append({
+                    "name": name,
+                    "url": image_doc["url"] if image_doc else None
+                })
+
+            results.append({
+                "id": str(prediction["_id"]),
+                "score": prediction["score"],
+                "category": prediction["category"],
+                "recommendations": image_data,
+                "timestamp": prediction["timestamp"]
+            })
+
+        logger.info(f"Retrieved {len(results)} predictions for user {user_id}")
+        return results
     except Exception as e:
-        print(f"🚨 Failed to initialize JewelryRLPredictor: {e}")
-        return None
+        logger.error(f"Error retrieving predictions: {e}")
+        return {"error": str(e)}
 
 def predict_compatibility(predictor, face_data, jewelry_data):
     """Wrapper for predict_compatibility method."""

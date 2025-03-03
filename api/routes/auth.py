@@ -1,123 +1,124 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from services.database import get_db_client  # Using MongoDB client
-from services.auth import hash_password, create_access_token, verify_password
-from datetime import datetime
-import os
+from pymongo import MongoClient
+from bson.objectid import ObjectId
+import jwt
+import datetime
+from typing import Optional
+from models.user import UserOut, UserRegister
 import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create APIRouter with prefix and tags
-router = APIRouter(prefix="/auth", tags=["auth"])
+# FastAPI router
+router = APIRouter(
+    prefix="/auth",
+    tags=["auth"],
+    responses={404: {"description": "Not found"}},
+)
 
-# Pydantic models
-class UserRegister(BaseModel):
-    username: str
-    mobileNo: str
-    password: str
-    otp: str  # Still included for compatibility with Flutter, but not verified server-side
+# Database connection (replace with your MongoDB URI)
+def get_db_client():
+    return MongoClient("mongodb://localhost:27017/")  # Replace with your MongoDB URI
 
-class UserOut(BaseModel):
-    id: str
-    username: str
-    mobileNo: str
-    created_at: str
-    access_token: str
-
-class OtpRequest(BaseModel):
-    mobileNo: str
-
-# --- Endpoints ---
-
-@router.get("/check-user/{mobile_no}")
-async def check_user(mobile_no: str):
-    """Check if a user exists by mobile number using MongoDB."""
-    try:
-        client = get_db_client()
-        db = client["jewelify"]
-        user = db["users"].find_one({"mobileNo": mobile_no})
-        return {"exists": bool(user)}
-    except Exception as e:
-        logger.error(f"Error checking user: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@router.post("/send-otp")
-async def send_otp(request: OtpRequest):
-    """Placeholder endpoint for sending OTP (handled by Firebase, not FastAPI)."""
-    try:
-        logger.info(f"Request to send OTP for {request.mobileNo} - Handled by Firebase")
-        return {"message": "OTP sending initiated (handled by Firebase)"}
-    except Exception as e:
-        logger.error(f"Error processing OTP request: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to process OTP request: {str(e)}")
+# Secret key for JWT (replace with your actual secret)
+SECRET_KEY = "your-secret-key"  # Replace with a secure secret key
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 @router.post("/register", response_model=UserOut)
 async def register(user: UserRegister):
-    """Register a new user after Firebase OTP verification, using MongoDB."""
     try:
         client = get_db_client()
         db = client["jewelify"]
-    except Exception as e:
-        logger.error(f"Database connection error: {e}")
-        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
-
-    # Check if username or mobile number already exists
-    if db["users"].find_one({"username": user.username}):
-        raise HTTPException(status_code=400, detail="Username already exists")
-    if db["users"].find_one({"mobileNo": user.mobileNo}):
-        raise HTTPException(status_code=400, detail="Mobile number already exists")
-
-    # Skip server-side OTP verification since Firebase handles it
-    # The Flutter app ensures OTP verification with Firebase before calling this endpoint
-
-    # Hash password
-    hashed_password = hash_password(user.password)
-    
-    # Save user data (no OTP stored in MongoDB)
-    user_data = {
-        "username": user.username,
-        "mobileNo": user.mobileNo,
-        "hashed_password": hashed_password,
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    
-    try:
+        
+        # Check if user exists by mobileNo
+        if db["users"].find_one({"mobileNo": user.mobileNo}):
+            raise HTTPException(status_code=400, detail="User already exists")
+        
+        # Hash password (simplified for this example; use bcrypt or similar in production)
+        hashed_password = user.password  # In practice, hash with bcrypt: hashed_password = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt())
+        
+        # Insert user into MongoDB
+        user_data = {
+            "username": user.username,
+            "mobileNo": user.mobileNo,
+            "password": hashed_password,
+            "created_at": datetime.datetime.utcnow().isoformat()
+        }
         result = db["users"].insert_one(user_data)
-        access_token = create_access_token(data={"sub": str(result.inserted_id)})
+        
+        # Generate JWT token
+        access_token = jwt.encode(
+            {"sub": str(result.inserted_id), "exp": datetime.datetime.utcnow().timestamp() + (ACCESS_TOKEN_EXPIRE_MINUTES * 60)},
+            SECRET_KEY,
+            algorithm=ALGORITHM
+        )
+        
+        # Return the user object with the token
+        response = {
+            "id": str(result.inserted_id),
+            "username": user.username,
+            "mobileNo": user.mobileNo,
+            "created_at": user_data["created_at"],
+            "access_token": access_token
+        }
+        
+        logger.info(f"User registered successfully: {response}")
+        return response
     except Exception as e:
         logger.error(f"Error registering user: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
-    
-    return {
-        "id": str(result.inserted_id),
-        "username": user.username,
-        "mobileNo": user.mobileNo,
-        "created_at": user_data["created_at"],
-        "access_token": access_token
-    }
+        raise HTTPException(status_code=500, detail=f"Failed to register user: {str(e)}")
 
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    """Login a user using username/mobileNo and password, using MongoDB."""
     try:
         client = get_db_client()
         db = client["jewelify"]
-        user = db["users"].find_one({
-            "$or": [
-                {"username": form_data.username},
-                {"mobileNo": form_data.username}
-            ]
-        })
+        
+        # Find user by username or mobileNo
+        user = db["users"].find_one({"$or": [{"username": form_data.username}, {"mobileNo": form_data.username}]})
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Verify password (simplified; use bcrypt in production)
+        if user["password"] != form_data.password:  # In practice, use: bcrypt.checkpw(form_data.password.encode(), user["password"].encode())
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Generate JWT token
+        access_token = jwt.encode(
+            {"sub": str(user["_id"]), "exp": datetime.datetime.utcnow().timestamp() + (ACCESS_TOKEN_EXPIRE_MINUTES * 60)},
+            SECRET_KEY,
+            algorithm=ALGORITHM
+        )
+        
+        # Return login response (matching UserOut for consistency)
+        response = {
+            "id": str(user["_id"]),
+            "username": user["username"],
+            "mobileNo": user["mobileNo"],
+            "created_at": user["created_at"],
+            "access_token": access_token
+        }
+        
+        logger.info(f"User logged in successfully: {response}")
+        return response
     except Exception as e:
-        logger.error(f"Database error during login: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        logger.error(f"Error logging in user: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to login: {str(e)}")
 
-    if not user or not verify_password(form_data.password, user["hashed_password"]):
-        raise HTTPException(status_code=400, detail="Incorrect username/mobileNo or password")
-
-    access_token = create_access_token(data={"sub": str(user["_id"])})
-    return {"access_token": access_token, "token_type": "bearer"}
+@router.get("/check-user/{mobileNo}")
+async def check_user_exists(mobileNo: str):
+    try:
+        client = get_db_client()
+        db = client["jewelify"]
+        
+        exists = bool(db["users"].find_one({"mobileNo": mobileNo}))
+        logger.info(f"Checked if user exists for mobileNo {mobileNo}: {exists}")
+        return {"exists": exists}
+    except Exception as e:
+        logger.error(f"Error checking user existence: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check user: {str(e)}")
