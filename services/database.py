@@ -3,9 +3,7 @@ import logging
 from pymongo import MongoClient
 from datetime import datetime
 from dotenv import load_dotenv
-from bson import ObjectId
-import random
-import bcrypt  # For password hashing
+import bcrypt
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -65,33 +63,7 @@ def check_user_exists(mobile_no: str) -> dict:
         logger.error(f"❌ Error checking user in MongoDB: {e}")
         return {"error": str(e)}
 
-def send_otp(mobile_no: str) -> dict:
-    client = get_db_client()
-    if not client:
-        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
-        if not rebuild_client():
-            logger.error("❌ Failed to rebuild MongoDB client, cannot send OTP")
-            return {"error": "Database connection error"}
-
-    try:
-        db = client["jewelify"]
-        users_collection = db["users"]
-        otp = str(random.randint(100000, 999999))  # Generate 6-digit OTP
-        # Simulate sending OTP (replace with actual SMS service like Twilio)
-        logger.info(f"📤 Sending OTP {otp} to {mobile_no}")
-
-        # Store OTP temporarily (could use a separate collection or cache)
-        users_collection.update_one(
-            {"mobileNo": mobile_no},
-            {"$set": {"otp": otp, "otp_created_at": datetime.utcnow().isoformat()}},
-            upsert=True  # Create if not exists
-        )
-        return {"message": "OTP sent successfully"}
-    except Exception as e:
-        logger.error(f"❌ Error sending OTP: {e}")
-        return {"error": str(e)}
-
-def register_user(username: str, mobile_no: str, password: str, otp: str) -> dict:
+def register_user(username: str, mobile_no: str, password: str) -> dict:
     client = get_db_client()
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
@@ -109,12 +81,6 @@ def register_user(username: str, mobile_no: str, password: str, otp: str) -> dic
             logger.warning(f"⚠️ User with mobileNo {mobile_no} already exists")
             return {"error": "User already exists"}
 
-        # Verify OTP
-        user_temp = users_collection.find_one({"mobileNo": mobile_no})
-        if not user_temp or user_temp.get("otp") != otp:
-            logger.warning(f"⚠️ Invalid OTP for {mobile_no}")
-            return {"error": "Invalid OTP"}
-        
         # Hash password
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
@@ -124,12 +90,8 @@ def register_user(username: str, mobile_no: str, password: str, otp: str) -> dic
             "mobileNo": mobile_no,
             "hashed_password": hashed_password,
             "created_at": datetime.utcnow().isoformat(),
-            "otp": None  # Clear OTP after verification
         }
         result = users_collection.insert_one(user_data)
-        
-        # Clear OTP
-        users_collection.update_one({"mobileNo": mobile_no}, {"$set": {"otp": None}})
 
         logger.info(f"✅ User registered with ID: {result.inserted_id}")
         return {"id": str(result.inserted_id), "message": "Registration successful"}
