@@ -16,8 +16,6 @@ class UserRegister(BaseModel):
             raise ValueError("Mobile number must contain only digits (optionally with a leading +)")
         return v
 
-        return v
-
 class UserLogin(BaseModel):
     username_or_mobile: str = Field(..., alias="username")
     password: str = Field(...)
