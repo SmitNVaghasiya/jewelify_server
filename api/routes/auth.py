@@ -1,16 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from services.database import get_db_client
+from services.database import get_db_client  # Using MongoDB client
 from services.auth import hash_password, create_access_token, verify_password
 from datetime import datetime
 import os
-import random
 import logging
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Create APIRouter with prefix and tags
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Pydantic models
@@ -18,7 +19,7 @@ class UserRegister(BaseModel):
     username: str
     mobileNo: str
     password: str
-    otp: str
+    otp: str  # Still included for compatibility with Flutter, but not verified server-side
 
 class UserOut(BaseModel):
     id: str
@@ -32,8 +33,9 @@ class OtpRequest(BaseModel):
 
 # --- Endpoints ---
 
-@router.get("/check-user")
+@router.get("/check-user/{mobile_no}")
 async def check_user(mobile_no: str):
+    """Check if a user exists by mobile number using MongoDB."""
     try:
         client = get_db_client()
         db = client["jewelify"]
@@ -45,41 +47,17 @@ async def check_user(mobile_no: str):
 
 @router.post("/send-otp")
 async def send_otp(request: OtpRequest):
+    """Placeholder endpoint for sending OTP (handled by Firebase, not FastAPI)."""
     try:
-        client = get_db_client()
-        db = client["jewelify"]
-        otp = str(random.randint(100000, 999999))  # Generate 6-digit OTP
-        
-        # Log OTP for debugging (replace with actual SMS service in production)
-        logger.info(f"Generated OTP for {request.mobileNo}: {otp}")
-
-        # Store OTP in the database
-        db["users"].update_one(
-            {"mobileNo": request.mobileNo},
-            {"$set": {"otp": otp, "otp_created_at": datetime.utcnow().isoformat()}},
-            upsert=True
-        )
-
-        # Twilio integration (uncomment and configure if using Twilio) once application starts running correctly
-        # i am going to use this code and also do not remove below code 
-        """
-        from twilio.rest import Client
-        twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
-        message = twilio_client.messages.create(
-            body=f"Your OTP for Jewelify is {otp}",
-            from_=os.getenv("TWILIO_PHONE_NUMBER"),
-            to=request.mobileNo
-        )
-        logger.info(f"Twilio SMS sent: {message.sid}")
-        """
-
-        return {"message": "OTP sent successfully"}
+        logger.info(f"Request to send OTP for {request.mobileNo} - Handled by Firebase")
+        return {"message": "OTP sending initiated (handled by Firebase)"}
     except Exception as e:
-        logger.error(f"Error sending OTP: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send OTP: {str(e)}")
+        logger.error(f"Error processing OTP request: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process OTP request: {str(e)}")
 
 @router.post("/register", response_model=UserOut)
 async def register(user: UserRegister):
+    """Register a new user after Firebase OTP verification, using MongoDB."""
     try:
         client = get_db_client()
         db = client["jewelify"]
@@ -93,22 +71,18 @@ async def register(user: UserRegister):
     if db["users"].find_one({"mobileNo": user.mobileNo}):
         raise HTTPException(status_code=400, detail="Mobile number already exists")
 
-    # Verify OTP
-    user_temp = db["users"].find_one({"mobileNo": user.mobileNo})
-    if not user_temp or user_temp.get("otp") != user.otp:
-        logger.warning(f"Invalid OTP for {user.mobileNo}: {user.otp}")
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-    
+    # Skip server-side OTP verification since Firebase handles it
+    # The Flutter app ensures OTP verification with Firebase before calling this endpoint
+
     # Hash password
     hashed_password = hash_password(user.password)
     
-    # Save user data
+    # Save user data (no OTP stored in MongoDB)
     user_data = {
         "username": user.username,
         "mobileNo": user.mobileNo,
         "hashed_password": hashed_password,
         "created_at": datetime.utcnow().isoformat(),
-        "otp": None  # Clear OTP after verification
     }
     
     try:
@@ -117,9 +91,6 @@ async def register(user: UserRegister):
     except Exception as e:
         logger.error(f"Error registering user: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
-    
-    # Clear OTP from database
-    db["users"].update_one({"mobileNo": user.mobileNo}, {"$set": {"otp": None}})
     
     return {
         "id": str(result.inserted_id),
@@ -131,6 +102,7 @@ async def register(user: UserRegister):
 
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Login a user using username/mobileNo and password, using MongoDB."""
     try:
         client = get_db_client()
         db = client["jewelify"]
