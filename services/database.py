@@ -3,6 +3,7 @@ import logging
 from pymongo import MongoClient
 from datetime import datetime
 from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
 import bcrypt
 
 # Configure logging
@@ -13,6 +14,8 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 client = None
+
+app = FastAPI()
 
 def get_db_client():
     global client
@@ -40,15 +43,16 @@ def rebuild_client():
         logger.error(f"🚨 Failed to rebuild MongoDB client: {e}")
         return False
 
-# --- Authentication Functions ---
+# --- Authentication Routes ---
 
-def check_user_exists(mobile_no: str) -> dict:
+@app.get("/auth/check-user")
+async def check_user(mobile_no: str):
     client = get_db_client()
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
         if not rebuild_client():
             logger.error("❌ Failed to rebuild MongoDB client, cannot check user")
-            return {"error": "Database connection error"}
+            raise HTTPException(status_code=500, detail="Database connection error")
 
     try:
         db = client["jewelify"]
@@ -61,25 +65,26 @@ def check_user_exists(mobile_no: str) -> dict:
         return {"exists": False}
     except Exception as e:
         logger.error(f"❌ Error checking user in MongoDB: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
-def register_user(username: str, mobile_no: str, password: str) -> dict:
+@app.post("/auth/register")
+async def register_user_endpoint(username: str, mobileNo: str, password: str):
     client = get_db_client()
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
         if not rebuild_client():
             logger.error("❌ Failed to rebuild MongoDB client, cannot register user")
-            return {"error": "Database connection error"}
+            raise HTTPException(status_code=500, detail="Database connection error")
 
     try:
         db = client["jewelify"]
         users_collection = db["users"]
 
         # Check if user already exists
-        existing_user = users_collection.find_one({"mobileNo": mobile_no})
+        existing_user = users_collection.find_one({"mobileNo": mobileNo})
         if existing_user:
-            logger.warning(f"⚠️ User with mobileNo {mobile_no} already exists")
-            return {"error": "User already exists"}
+            logger.warning(f"⚠️ User with mobileNo {mobileNo} already exists")
+            raise HTTPException(status_code=400, detail="User already exists")
 
         # Hash password
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -87,7 +92,7 @@ def register_user(username: str, mobile_no: str, password: str) -> dict:
         # Save user
         user_data = {
             "username": username,
-            "mobileNo": mobile_no,
+            "mobileNo": mobileNo,
             "hashed_password": hashed_password,
             "created_at": datetime.utcnow().isoformat(),
         }
@@ -97,7 +102,33 @@ def register_user(username: str, mobile_no: str, password: str) -> dict:
         return {"id": str(result.inserted_id), "message": "Registration successful"}
     except Exception as e:
         logger.error(f"❌ Error registering user: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/login")
+async def login_user(username: str, password: str):
+    client = get_db_client()
+    if not client:
+        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        if not rebuild_client():
+            logger.error("❌ Failed to rebuild MongoDB client, cannot login user")
+            raise HTTPException(status_code=500, detail="Database connection error")
+
+    try:
+        db = client["jewelify"]
+        users_collection = db["users"]
+        user = users_collection.find_one({"username": username})
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        if not bcrypt.checkpw(password.encode('utf-8'), user["hashed_password"].encode('utf-8')):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        # In a real app, generate a JWT token here
+        access_token = f"token-{user['_id']}"  # Placeholder
+        return {"access_token": access_token, "token_type": "bearer"}
+    except Exception as e:
+        logger.error(f"❌ Error logging in user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Existing Prediction Functions ---
 
