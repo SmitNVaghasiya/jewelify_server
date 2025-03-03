@@ -8,7 +8,7 @@ from api.routes import auth, predictions, history
 load_dotenv()
 
 # FastAPI app
-app = FastAPI()
+app = FastAPI(title="Jewelify API", description="API for Jewelify application")
 
 # Include routers
 app.include_router(auth.router)
