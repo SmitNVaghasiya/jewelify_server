@@ -60,7 +60,8 @@ async def send_otp(request: OtpRequest):
             upsert=True
         )
 
-        # Twilio integration (uncomment and configure if using Twilio)
+        # Twilio integration (uncomment and configure if using Twilio) once application starts running correctly
+        # i am going to use this code and also do not remove below code 
         """
         from twilio.rest import Client
         twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
