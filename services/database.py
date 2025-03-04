@@ -90,12 +90,10 @@ def get_prediction_by_id(prediction_id, user_id):
         image_data = []
         for name in recommendations:
             image_doc = images_collection.find_one({"name": name})
-            url = None
-            if image_doc and "url" in image_doc:
-                url = image_doc["url"]  # Use the URL directly from the database
+            url = image_doc.get("url") if image_doc else None
             image_data.append({
                 "name": name,
-                "url": url  # No fallback URL; rely on S3 URL
+                "url": url  # Use the S3 URL directly from the database
             })
 
         result = {
@@ -109,6 +107,50 @@ def get_prediction_by_id(prediction_id, user_id):
         return result
     except Exception as e:
         logger.error(f"❌ Error retrieving prediction from MongoDB: {e}")
+        return {"error": f"Database error: {str(e)}"}
+
+def get_user_predictions(user_id):
+    client = get_db_client()
+    if not client:
+        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        if not rebuild_client():
+            logger.error("❌ Failed to rebuild MongoDB client, cannot retrieve predictions")
+            return {"error": "Database connection error"}
+
+    try:
+        db = client["jewelify"]
+        predictions_collection = db["recommendations"]
+        images_collection = db["images"]
+
+        predictions = list(predictions_collection.find({"user_id": ObjectId(user_id)}).sort("timestamp", -1))
+        if not predictions:
+            logger.warning(f"⚠️ No predictions found for user {user_id}")
+            return {"error": "No predictions found"}
+
+        results = []
+        for prediction in predictions:
+            recommendations = prediction.get("recommendations", [])
+            image_data = []
+            for name in recommendations:
+                image_doc = images_collection.find_one({"name": name})
+                url = image_doc.get("url") if image_doc else None
+                image_data.append({
+                    "name": name,
+                    "url": url  # Use the S3 URL directly from the database
+                })
+
+            results.append({
+                "id": str(prediction["_id"]),
+                "score": prediction["score"],
+                "category": prediction["category"],
+                "recommendations": image_data,
+                "timestamp": prediction["timestamp"]
+            })
+
+        logger.info(f"✅ Retrieved {len(results)} predictions for user {user_id}")
+        return results
+    except Exception as e:
+        logger.error(f"❌ Error retrieving predictions from MongoDB: {e}")
         return {"error": f"Database error: {str(e)}"}
 
 def get_user_predictions(user_id):
