@@ -82,16 +82,27 @@ class JewelryRLPredictor:
         # else:
         #     category = "\u274C Very Bad"  # ❌ (U+274C)
 
+        # if scaled_score >= 0.8:
+        #     category = "🌟 Very Good"
+        # elif scaled_score >= 0.6:
+        #     category = "✅ Good"
+        # elif scaled_score >= 0.4:
+        #     category = "😐 Neutral"
+        # elif scaled_score >= 0.2:
+        #     category = "⚠️ Bad"
+        # else:
+        #     category = "❌ Very Bad"
+
         if scaled_score >= 0.8:
-            category = "🌟 Very Good"
+            category = "Very Good"
         elif scaled_score >= 0.6:
-            category = "✅ Good"
+            category = "Good"
         elif scaled_score >= 0.4:
-            category = "😐 Neutral"
+            category = "Neutral"
         elif scaled_score >= 0.2:
-            category = "⚠️ Bad"
+            category = "Bad"
         else:
-            category = "❌ Very Bad"
+            category = "Very Bad"
 
         print(f"Category with emoji code: {category}")  # Debug print to verify
 
