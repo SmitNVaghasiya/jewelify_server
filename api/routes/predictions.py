@@ -1,6 +1,6 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
 from services.predictor import get_predictor, predict_compatibility
-from services.database import save_prediction
+from services.database import save_prediction, get_prediction_by_id
 from api.dependencies import get_current_user
 import os
 
@@ -34,12 +34,12 @@ async def predict(
         face_data = await face.read()
         jewelry_data = await jewelry.read()
     except Exception as e:
-        raise HTTPException(status_code=400, detail="Failed to read uploaded images: " + str(e))
+        raise HTTPException(status_code=400, detail=f"Failed to read uploaded images: {str(e)}")
 
     try:
         score, category, recommendations = predict_compatibility(predictor, face_data, jewelry_data)
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Prediction error: " + str(e))
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
     
     if score is None:
         raise HTTPException(status_code=500, detail="Prediction failed")
@@ -47,22 +47,24 @@ async def predict(
     try:
         prediction_id = save_prediction(score, category, recommendations, str(current_user["_id"]))
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to save prediction: " + str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to save prediction: {str(e)}")
     
     return {
         "prediction_id": prediction_id,
         "score": score,
-        "category": category,  # This will now contain Unicode emoji codes
+        "category": category,
         "recommendations": recommendations,
     }
 
 @router.get("/get_prediction/{prediction_id}")
-async def get_prediction(prediction_id: str):
-    from services.database import get_prediction_by_id
+async def get_prediction(
+    prediction_id: str,
+    current_user: dict = Depends(get_current_user)  # Explicitly added authentication
+):
     try:
-        result = get_prediction_by_id(prediction_id)
+        result = get_prediction_by_id(prediction_id, str(current_user["_id"]))
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
     if "error" in result:
         status_code = 404 if result["error"] == "Prediction not found" else 500
@@ -75,7 +77,7 @@ async def get_predictions():
     try:
         result = get_all_predictions()
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
     if "error" in result:
         status_code = 500 if result["error"] != "No predictions found" else 404

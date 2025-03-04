@@ -10,7 +10,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("SECRET_KEY", "default-secret-key")  # Now loaded from .env
 ALGORITHM = "HS256"
 # Use the environment variable for token expiry if available; otherwise, default to 30 minutes.
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 230))
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)

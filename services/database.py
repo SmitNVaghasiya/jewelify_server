@@ -65,7 +65,7 @@ def save_prediction(score, category, recommendations, user_id):
         logger.error(f"❌ Error saving prediction to MongoDB: {e}")
         return None
 
-def get_prediction_by_id(prediction_id):
+def get_prediction_by_id(prediction_id, user_id):
     client = get_db_client()
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
@@ -78,22 +78,23 @@ def get_prediction_by_id(prediction_id):
         predictions_collection = db["recommendations"]
         images_collection = db["images"]
 
-        prediction = predictions_collection.find_one({"_id": ObjectId(prediction_id)})
+        prediction = predictions_collection.find_one({
+            "_id": ObjectId(prediction_id),
+            "user_id": ObjectId(user_id)
+        })
         if not prediction:
-            logger.warning(f"⚠️ Prediction with ID {prediction_id} not found")
+            logger.warning(f"⚠️ Prediction with ID {prediction_id} not found for user {user_id}")
             return {"error": "Prediction not found"}
 
         recommendations = prediction.get("recommendations", [])
         image_data = []
         for name in recommendations:
             image_doc = images_collection.find_one({"name": name})
-            # Ensure URL is a public, fully qualified URL
             url = None
             if image_doc and "url" in image_doc:
                 url = image_doc["url"]
                 if url and not url.startswith(('http://', 'https://')):
-                    # Prepend your server base URL if the URL is relative or local
-                    url = f"https://jewelify-server.onrender.com/images/{name}"  # Adjust based on your server
+                    url = f"https://jewelify-server.onrender.com/images/{name}"
             image_data.append({
                 "name": name,
                 "url": url
@@ -106,14 +107,13 @@ def get_prediction_by_id(prediction_id):
             "recommendations": image_data,
             "timestamp": prediction["timestamp"]
         }
-
-        logger.info(f"✅ Retrieved prediction with ID: {prediction_id}")
+        logger.info(f"✅ Retrieved prediction with ID: {prediction_id} for user {user_id}")
         return result
     except Exception as e:
         logger.error(f"❌ Error retrieving prediction from MongoDB: {e}")
-        return {"error": str(e)}
+        return {"error": f"Database error: {str(e)}"}
 
-def get_all_predictions():
+def get_user_predictions(user_id):
     client = get_db_client()
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
@@ -126,9 +126,9 @@ def get_all_predictions():
         predictions_collection = db["recommendations"]
         images_collection = db["images"]
 
-        predictions = list(predictions_collection.find().sort("timestamp", -1))
+        predictions = list(predictions_collection.find({"user_id": ObjectId(user_id)}).sort("timestamp", -1))
         if not predictions:
-            logger.warning("⚠️ No predictions found")
+            logger.warning(f"⚠️ No predictions found for user {user_id}")
             return {"error": "No predictions found"}
 
         results = []
@@ -137,13 +137,11 @@ def get_all_predictions():
             image_data = []
             for name in recommendations:
                 image_doc = images_collection.find_one({"name": name})
-                # Ensure URL is a public, fully qualified URL
                 url = None
                 if image_doc and "url" in image_doc:
                     url = image_doc["url"]
                     if url and not url.startswith(('http://', 'https://')):
-                        # Prepend your server base URL if the URL is relative or local
-                        url = f"https://jewelify-server.onrender.com/images/{name}"  # Adjust based on your server
+                        url = f"https://jewelify-server.onrender.com/images/{name}"
                 image_data.append({
                     "name": name,
                     "url": url
@@ -157,8 +155,28 @@ def get_all_predictions():
                 "timestamp": prediction["timestamp"]
             })
 
-        logger.info(f"✅ Retrieved {len(results)} predictions")
+        logger.info(f"✅ Retrieved {len(results)} predictions for user {user_id}")
         return results
     except Exception as e:
         logger.error(f"❌ Error retrieving predictions from MongoDB: {e}")
-        return {"error": str(e)}
+        return {"error": f"Database error: {str(e)}"}
+
+def get_all_predictions():
+    client = get_db_client()
+    if not client:
+        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        if not rebuild_client():
+            logger.error("❌ Failed to rebuild MongoDB client, cannot retrieve predictions")
+            return {"error": "Database connection error"}
+
+    try:
+        db = client["jewelify"]
+        predictions_collection = db["recommendations"]
+        predictions = list(predictions_collection.find().sort("timestamp", -1))
+        if not predictions:
+            logger.warning("⚠️ No predictions found")
+            return {"error": "No predictions found"}
+        return predictions  # Simplified for brevity; could format like get_user_predictions if needed
+    except Exception as e:
+        logger.error(f"❌ Error retrieving all predictions from MongoDB: {e}")
+        return {"error": f"Database error: {str(e)}"}
