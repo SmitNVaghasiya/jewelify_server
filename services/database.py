@@ -92,12 +92,10 @@ def get_prediction_by_id(prediction_id, user_id):
             image_doc = images_collection.find_one({"name": name})
             url = None
             if image_doc and "url" in image_doc:
-                url = image_doc["url"]
-                if url and not url.startswith(('http://', 'https://')):
-                    url = f"https://jewelify-server.onrender.com/images/{name}"
+                url = image_doc["url"]  # Use the URL directly from the database
             image_data.append({
                 "name": name,
-                "url": url
+                "url": url  # No fallback URL; rely on S3 URL
             })
 
         result = {
@@ -139,12 +137,10 @@ def get_user_predictions(user_id):
                 image_doc = images_collection.find_one({"name": name})
                 url = None
                 if image_doc and "url" in image_doc:
-                    url = image_doc["url"]
-                    if url and not url.startswith(('http://', 'https://')):
-                        url = f"https://jewelify-server.onrender.com/images/{name}"
+                    url = image_doc["url"]  # Use the URL directly from the database
                 image_data.append({
                     "name": name,
-                    "url": url
+                    "url": url  # No fallback URL; rely on S3 URL
                 })
 
             results.append({
