@@ -88,9 +88,16 @@ def get_prediction_by_id(prediction_id):
         image_data = []
         for name in recommendations:
             image_doc = images_collection.find_one({"name": name})
+            # Ensure URL is a public, fully qualified URL
+            url = None
+            if image_doc and "url" in image_doc:
+                url = image_doc["url"]
+                if url and not url.startswith(('http://', 'https://')):
+                    # Prepend your server base URL if the URL is relative or local
+                    url = f"https://jewelify-server.onrender.com/images/{name}"  # Adjust based on your server
             image_data.append({
                 "name": name,
-                "url": image_doc["url"] if image_doc and "url" in image_doc else None
+                "url": url
             })
 
         result = {
