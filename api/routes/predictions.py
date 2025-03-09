@@ -70,16 +70,3 @@ async def get_prediction(
         status_code = 404 if result["error"] == "Prediction not found" else 500
         raise HTTPException(status_code=status_code, detail=result["error"])
     return result
-
-@router.get("/get_predictions")
-async def get_predictions():
-    from services.database import get_all_predictions
-    try:
-        result = get_all_predictions()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
-    if "error" in result:
-        status_code = 500 if result["error"] != "No predictions found" else 404
-        raise HTTPException(status_code=status_code, detail=result["error"])
-    return result

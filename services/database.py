@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
-client = None
+client = MongoClient(MONGO_URI)
 
 def get_db_client():
     global client
@@ -155,24 +155,4 @@ def get_user_predictions(user_id):
         return results
     except Exception as e:
         logger.error(f"❌ Error retrieving predictions from MongoDB: {e}")
-        return {"error": f"Database error: {str(e)}"}
-
-def get_all_predictions():
-    client = get_db_client()
-    if not client:
-        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
-        if not rebuild_client():
-            logger.error("❌ Failed to rebuild MongoDB client, cannot retrieve predictions")
-            return {"error": "Database connection error"}
-
-    try:
-        db = client["jewelify"]
-        predictions_collection = db["recommendations"]
-        predictions = list(predictions_collection.find().sort("timestamp", -1))
-        if not predictions:
-            logger.warning("⚠️ No predictions found")
-            return {"error": "No predictions found"}
-        return predictions  # Simplified for brevity; could format like get_user_predictions if needed
-    except Exception as e:
-        logger.error(f"❌ Error retrieving all predictions from MongoDB: {e}")
         return {"error": f"Database error: {str(e)}"}

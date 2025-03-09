@@ -1,0 +1,15 @@
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+All the changes i have to do inorder to run the project
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+in .env file add # JWT SECRET_KEY
+API/routes  @router.get("/get_prediction/{prediction_id}") i have to use the user_id instead of the prediction user_id as based on the user_id i want to show them the prediction history
+
+
+
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Quries and my thoights
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+why need a ACCESS_TOKEN_EXPIRE_MINUTES this minutes 
+There is extra api for the accessing all the predictions
+How to access objects from the folder in render or any other server like Weights of ml model. 

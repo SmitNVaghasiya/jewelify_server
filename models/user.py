@@ -1,14 +1,14 @@
 # models/user.py
 from bson import ObjectId
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 class UserRegister(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
-    mobileNo: str = Field(..., min_length=10, max_length=15)
+    mobileNo: str = Field(..., min_length=10, max_length=13)
     password: str = Field(..., min_length=6)
     otp: str = Field(..., min_length=6, max_length=6)
 
-    @validator("mobileNo")
+    @field_validator("mobileNo")
     def validate_mobile(cls, v):
     # Option 1: Allow a leading plus, then digits
         import re
