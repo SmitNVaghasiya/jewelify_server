@@ -93,7 +93,7 @@ async def register(user: UserRegister):
         "access_token": access_token,
     }
 
-@router.post("/login")
+@router.post("/login", response_model=UserOut)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     """Login a user using username/mobileNo and password."""
     try:
@@ -113,14 +113,10 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         raise HTTPException(status_code=400, detail="Incorrect username/mobileNo or password")
 
     access_token = create_access_token(data={"sub": str(user["_id"])})
-    return {"access_token": access_token, "token_type": "bearer"}
-
-@router.get("/me", response_model=UserOut)
-async def get_current_user_details(current_user: dict = Depends(get_current_user)):
-    """Fetch current user details."""
     return {
-        "id": str(current_user["_id"]),
-        "username": current_user["username"],
-        "mobileNo": current_user["mobileNo"],
-        "created_at": current_user["created_at"],
+        "id": str(user["_id"]),
+        "username": user["username"],
+        "mobileNo": user["mobileNo"],
+        "created_at": user["created_at"],
+        "access_token": access_token,
     }
