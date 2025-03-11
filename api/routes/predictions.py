@@ -15,6 +15,8 @@ predictor = get_predictor(
 async def predict(
     face: UploadFile = File(...),
     jewelry: UploadFile = File(...),
+    face_image_path: str = Form(...),  # Receive local path
+    jewelry_image_path: str = Form(...),  # Receive local path
     current_user: dict = Depends(get_current_user)
 ):
     global predictor
@@ -49,8 +51,8 @@ async def predict(
         {
             "name": rec["name"],
             "url": rec.get("url"),
-            "score": rec.get("score", score),  # Use overall score as default
-            "category": rec.get("category", category)  # Use overall category as default
+            "score": rec.get("score", score),
+            "category": rec.get("category", category)
         }
         for rec in recommendations
     ]
@@ -61,8 +63,8 @@ async def predict(
             category,
             formatted_recommendations,
             str(current_user["_id"]),
-            face_data,  # Pass face image data
-            jewelry_data  # Pass jewelry image data
+            face_image_path,  # Store local path
+            jewelry_image_path  # Store local path
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save prediction: {str(e)}")
@@ -73,6 +75,8 @@ async def predict(
         "score": score,
         "category": category,
         "recommendations": formatted_recommendations,
+        "face_image_path": face_image_path,  # Return local path
+        "jewelry_image_path": jewelry_image_path  # Return local path
     }
 
 @router.get("/get_prediction/{prediction_id}")
