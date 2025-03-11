@@ -1,20 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from services.database import get_db_client  # Using MongoDB client
+from services.database import get_db_client
 from services.auth import hash_password, create_access_token, verify_password
 from datetime import datetime
 import os
 import logging
+from api.dependencies import get_current_user
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create APIRouter with prefix and tags
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# Pydantic models
 class UserRegister(BaseModel):
     username: str
     mobileNo: str
@@ -26,12 +25,10 @@ class UserOut(BaseModel):
     username: str
     mobileNo: str
     created_at: str
-    access_token: str
+    access_token: str = None  # Optional, since it’s in headers for /me
 
 class OtpRequest(BaseModel):
     mobileNo: str
-
-# --- Endpoints ---
 
 @router.get("/check-user/{mobile_no}")
 async def check_user(mobile_no: str):
@@ -47,7 +44,7 @@ async def check_user(mobile_no: str):
 
 @router.post("/send-otp")
 async def send_otp(request: OtpRequest):
-    """Placeholder endpoint for sending OTP (handled by Firebase, not FastAPI)."""
+    """Placeholder endpoint for sending OTP (handled by Firebase)."""
     try:
         logger.info(f"Request to send OTP for {request.mobileNo} - Handled by Firebase")
         return {"message": "OTP sending initiated (handled by Firebase)"}
@@ -61,10 +58,9 @@ async def register(user: UserRegister):
         client = get_db_client()
         db = client["jewelify"]
     except Exception as e:
-        logger.error(f"Database connection error: $e")
+        logger.error(f"Database connection error: {e}")
         raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
 
-    # Check if username or mobile number already exists
     if db["users"].find_one({"username": user.username}):
         raise HTTPException(status_code=400, detail="Username already exists")
     if db["users"].find_one({"mobileNo": user.mobileNo}):
@@ -72,12 +68,9 @@ async def register(user: UserRegister):
     if db["users"].find_one({"firebase_uid": user.id}):
         raise HTTPException(status_code=400, detail="Firebase UID already registered")
 
-    # Hash password
     hashed_password = hash_password(user.password)
-
-    # Store the Firebase UID separately and let MongoDB generate a new ObjectId
     user_data = {
-        "firebase_uid": user.id,  # Store Firebase UID separately
+        "firebase_uid": user.id,
         "username": user.username,
         "mobileNo": user.mobileNo,
         "hashed_password": hashed_password,
@@ -86,10 +79,10 @@ async def register(user: UserRegister):
 
     try:
         result = db["users"].insert_one(user_data)
-        user_id = str(result.inserted_id)  # MongoDB-generated ObjectId
+        user_id = str(result.inserted_id)
         access_token = create_access_token(data={"sub": user_id})
     except Exception as e:
-        logger.error(f"Error registering user: $e")
+        logger.error(f"Error registering user: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
 
     return {
@@ -97,12 +90,12 @@ async def register(user: UserRegister):
         "username": user.username,
         "mobileNo": user.mobileNo,
         "created_at": user_data["created_at"],
-        "access_token": access_token
+        "access_token": access_token,
     }
 
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    """Login a user using username/mobileNo and password, using MongoDB."""
+    """Login a user using username/mobileNo and password."""
     try:
         client = get_db_client()
         db = client["jewelify"]
@@ -121,3 +114,13 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
     access_token = create_access_token(data={"sub": str(user["_id"])})
     return {"access_token": access_token, "token_type": "bearer"}
+
+@router.get("/me", response_model=UserOut)
+async def get_current_user_details(current_user: dict = Depends(get_current_user)):
+    """Fetch current user details."""
+    return {
+        "id": str(current_user["_id"]),
+        "username": current_user["username"],
+        "mobileNo": current_user["mobileNo"],
+        "created_at": current_user["created_at"],
+    }
