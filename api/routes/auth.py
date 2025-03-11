@@ -19,7 +19,7 @@ class UserRegister(BaseModel):
     username: str
     mobileNo: str
     password: str
-    id: str  # Added to match Flutter's request
+    id: str  # Firebase UID
 
 class UserOut(BaseModel):
     id: str
@@ -57,12 +57,11 @@ async def send_otp(request: OtpRequest):
 
 @router.post("/register", response_model=UserOut)
 async def register(user: UserRegister):
-    """Register a new user after Firebase OTP verification, using MongoDB."""
     try:
         client = get_db_client()
         db = client["jewelify"]
     except Exception as e:
-        logger.error(f"Database connection error: {e}")
+        logger.error(f"Database connection error: $e")
         raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
 
     # Check if username or mobile number already exists
@@ -70,30 +69,31 @@ async def register(user: UserRegister):
         raise HTTPException(status_code=400, detail="Username already exists")
     if db["users"].find_one({"mobileNo": user.mobileNo}):
         raise HTTPException(status_code=400, detail="Mobile number already exists")
+    if db["users"].find_one({"firebase_uid": user.id}):
+        raise HTTPException(status_code=400, detail="Firebase UID already registered")
 
     # Hash password
     hashed_password = hash_password(user.password)
-    
-    # Save user data with the provided id (assuming it's a valid ObjectId from Firebase)
+
+    # Store the Firebase UID separately and let MongoDB generate a new ObjectId
     user_data = {
-        "_id": user.id,  # Use the provided id as the MongoDB _id
+        "firebase_uid": user.id,  # Store Firebase UID separately
         "username": user.username,
         "mobileNo": user.mobileNo,
         "hashed_password": hashed_password,
         "created_at": datetime.utcnow().isoformat(),
     }
-    
+
     try:
         result = db["users"].insert_one(user_data)
-        if str(result.inserted_id) != user.id:
-            logger.warning(f"Inserted ID {result.inserted_id} does not match provided ID {user.id}")
-        access_token = create_access_token(data={"sub": user.id})
+        user_id = str(result.inserted_id)  # MongoDB-generated ObjectId
+        access_token = create_access_token(data={"sub": user_id})
     except Exception as e:
-        logger.error(f"Error registering user: {e}")
+        logger.error(f"Error registering user: $e")
         raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
-    
+
     return {
-        "id": user.id,  # Return the provided id
+        "id": user_id,
         "username": user.username,
         "mobileNo": user.mobileNo,
         "created_at": user_data["created_at"],
