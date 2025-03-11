@@ -3,6 +3,7 @@ from services.predictor import get_predictor, predict_compatibility
 from services.database import save_prediction, get_prediction_by_id
 from api.dependencies import get_current_user
 import os
+from fastapi import Form
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 predictor = get_predictor(

@@ -51,37 +51,18 @@ def save_prediction(score, category, recommendations, user_id, face_data=None, j
     try:
         db = client["jewelify"]
         collection = db["recommendations"]
-        images_collection = db["images"]
 
-        # Save face and jewelry images to images collection
-        face_url = None
-        jewelry_url = None
-        if face_data:
-            face_image_id = str(ObjectId())
-            images_collection.insert_one({
-                "_id": face_image_id,
-                "name": f"face_{face_image_id}",
-                "data": face_data,  # Store binary data
-                "type": "face"
-            })
-            face_url = f"face_{face_image_id}"
-        if jewelry_data:
-            jewelry_image_id = str(ObjectId())
-            images_collection.insert_one({
-                "_id": jewelry_image_id,
-                "name": f"jewelry_{jewelry_image_id}",
-                "data": jewelry_data,  # Store binary data
-                "type": "jewelry"
-            })
-            jewelry_url = f"jewelry_{jewelry_image_id}"
+        # Store local paths instead of binary data
+        face_url = face_data if face_data else None  # Expecting a path string
+        jewelry_url = jewelry_data if jewelry_data else None  # Expecting a path string
 
         prediction = {
             "user_id": ObjectId(user_id),
             "score": score,
             "category": category,
             "recommendations": recommendations,
-            "face_image": face_url,  # Reference to face image
-            "jewelry_image": jewelry_url,  # Reference to jewelry image
+            "face_image": face_url,  # Store local path
+            "jewelry_image": jewelry_url,  # Store local path
             "timestamp": datetime.utcnow().isoformat()
         }
         result = collection.insert_one(prediction)
