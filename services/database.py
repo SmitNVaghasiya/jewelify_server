@@ -40,7 +40,7 @@ def rebuild_client():
         logger.error(f"🚨 Failed to rebuild MongoDB client: {e}")
         return False
 
-def save_prediction(score, category, recommendations, user_id):
+def save_prediction(score, category, recommendations, user_id, face_data=None, jewelry_data=None):
     client = get_db_client()
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
@@ -51,11 +51,37 @@ def save_prediction(score, category, recommendations, user_id):
     try:
         db = client["jewelify"]
         collection = db["recommendations"]
+        images_collection = db["images"]
+
+        # Save face and jewelry images to images collection
+        face_url = None
+        jewelry_url = None
+        if face_data:
+            face_image_id = str(ObjectId())
+            images_collection.insert_one({
+                "_id": face_image_id,
+                "name": f"face_{face_image_id}",
+                "data": face_data,  # Store binary data
+                "type": "face"
+            })
+            face_url = f"face_{face_image_id}"
+        if jewelry_data:
+            jewelry_image_id = str(ObjectId())
+            images_collection.insert_one({
+                "_id": jewelry_image_id,
+                "name": f"jewelry_{jewelry_image_id}",
+                "data": jewelry_data,  # Store binary data
+                "type": "jewelry"
+            })
+            jewelry_url = f"jewelry_{jewelry_image_id}"
+
         prediction = {
             "user_id": ObjectId(user_id),
             "score": score,
             "category": category,
             "recommendations": recommendations,
+            "face_image": face_url,  # Reference to face image
+            "jewelry_image": jewelry_url,  # Reference to jewelry image
             "timestamp": datetime.utcnow().isoformat()
         }
         result = collection.insert_one(prediction)
@@ -86,23 +112,36 @@ def get_prediction_by_id(prediction_id, user_id):
             logger.warning(f"⚠️ Prediction with ID {prediction_id} not found for user {user_id}")
             return {"error": "Prediction not found"}
 
+        # Fetch recommendation images
         recommendations = prediction.get("recommendations", [])
         image_data = []
-        for name in recommendations:
-            image_doc = images_collection.find_one({"name": name})
-            url = None
-            if image_doc and "url" in image_doc:
-                url = image_doc["url"]  # Use the URL directly from the database
+        for rec in recommendations:
+            image_doc = images_collection.find_one({"name": rec["name"]})
+            url = image_doc["url"] if image_doc and "url" in image_doc else None
             image_data.append({
-                "name": name,
-                "url": url  # No fallback URL; rely on S3 URL
+                "name": rec["name"],
+                "url": url,
+                "score": rec.get("score", prediction.get("score", 0.0)),
+                "category": rec.get("category", prediction.get("category", "Not Assigned"))
             })
+
+        # Fetch face and jewelry images
+        face_url = None
+        jewelry_url = None
+        if prediction.get("face_image"):
+            face_doc = images_collection.find_one({"name": prediction["face_image"]})
+            face_url = face_doc["url"] if face_doc and "url" in face_doc else None
+        if prediction.get("jewelry_image"):
+            jewelry_doc = images_collection.find_one({"name": prediction["jewelry_image"]})
+            jewelry_url = jewelry_doc["url"] if jewelry_doc and "url" in jewelry_doc else None
 
         result = {
             "id": str(prediction["_id"]),
             "score": prediction["score"],
             "category": prediction["category"],
             "recommendations": image_data,
+            "face_image": face_url,
+            "jewelry_image": jewelry_url,
             "timestamp": prediction["timestamp"]
         }
         logger.info(f"✅ Retrieved prediction with ID: {prediction_id} for user {user_id}")
@@ -133,21 +172,33 @@ def get_user_predictions(user_id):
         for prediction in predictions:
             recommendations = prediction.get("recommendations", [])
             image_data = []
-            for name in recommendations:
-                image_doc = images_collection.find_one({"name": name})
-                url = None
-                if image_doc and "url" in image_doc:
-                    url = image_doc["url"]  # Use the URL directly from the database
+            for rec in recommendations:
+                image_doc = images_collection.find_one({"name": rec["name"]})
+                url = image_doc["url"] if image_doc and "url" in image_doc else None
                 image_data.append({
-                    "name": name,
-                    "url": url  # No fallback URL; rely on S3 URL
+                    "name": rec["name"],
+                    "url": url,
+                    "score": rec.get("score", prediction.get("score", 0.0)),
+                    "category": rec.get("category", prediction.get("category", "Not Assigned"))
                 })
+
+            # Fetch face and jewelry images
+            face_url = None
+            jewelry_url = None
+            if prediction.get("face_image"):
+                face_doc = images_collection.find_one({"name": prediction["face_image"]})
+                face_url = face_doc["url"] if face_doc and "url" in face_doc else None
+            if prediction.get("jewelry_image"):
+                jewelry_doc = images_collection.find_one({"name": prediction["jewelry_image"]})
+                jewelry_url = jewelry_doc["url"] if jewelry_doc and "url" in jewelry_doc else None
 
             results.append({
                 "id": str(prediction["_id"]),
                 "score": prediction["score"],
                 "category": prediction["category"],
                 "recommendations": image_data,
+                "face_image": face_url,
+                "jewelry_image": jewelry_url,
                 "timestamp": prediction["timestamp"]
             })
 

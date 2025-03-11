@@ -22,28 +22,31 @@ async def get_user_history(current_user: dict = Depends(get_current_user)):
         return {"message": "No predictions found", "recommendations": []}
 
     results = []
-    images_collection = db["images"]  # Access the images collection
     for pred in predictions:
         recommendations = pred.get("recommendations", [])
         formatted_recommendations = []
         for item in recommendations:
             if isinstance(item, str):
-                # Fetch the URL from the images collection
-                image_doc = images_collection.find_one({"name": item})
-                url = None
-                if image_doc and "url" in image_doc:
-                    url = image_doc["url"]
                 formatted_recommendations.append({
                     "name": item,
-                    "url": url
+                    "url": None,
+                    "score": pred.get("score", 0.0),
+                    "category": pred.get("category", "Not Assigned")
                 })
             elif isinstance(item, dict) and "name" in item:
                 formatted_recommendations.append({
                     "name": item["name"],
-                    "url": item.get("url", None)
+                    "url": item.get("url", None),
+                    "score": item.get("score", pred.get("score", 0.0)),
+                    "category": item.get("category", pred.get("category", "Not Assigned"))
                 })
             else:
-                formatted_recommendations.append({"name": str(item), "url": None})
+                formatted_recommendations.append({
+                    "name": str(item),
+                    "url": None,
+                    "score": pred.get("score", 0.0),
+                    "category": pred.get("category", "Not Assigned")
+                })
 
         results.append({
             "id": str(pred["_id"]),
@@ -51,6 +54,8 @@ async def get_user_history(current_user: dict = Depends(get_current_user)):
             "score": pred["score"],
             "category": pred["category"],
             "recommendations": formatted_recommendations,
+            "face_image_path": pred.get("face_image"),  # Return local path
+            "jewelry_image_path": pred.get("jewelry_image"),  # Return local path
             "timestamp": pred["timestamp"]
         })
 

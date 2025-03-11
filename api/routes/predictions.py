@@ -44,18 +44,35 @@ async def predict(
     if score is None:
         raise HTTPException(status_code=500, detail="Prediction failed")
 
+    # Ensure recommendations include score and category
+    formatted_recommendations = [
+        {
+            "name": rec["name"],
+            "url": rec.get("url"),
+            "score": rec.get("score", score),  # Use overall score as default
+            "category": rec.get("category", category)  # Use overall category as default
+        }
+        for rec in recommendations
+    ]
+
     try:
-        prediction_id = save_prediction(score, category, recommendations, str(current_user["_id"]))
+        prediction_id = save_prediction(
+            score,
+            category,
+            formatted_recommendations,
+            str(current_user["_id"]),
+            face_data,  # Pass face image data
+            jewelry_data  # Pass jewelry image data
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save prediction: {str(e)}")
     
-    # Include user_id in the response
     return {
         "prediction_id": prediction_id,
-        "user_id": str(current_user["_id"]),  # Added user_id to the response
+        "user_id": str(current_user["_id"]),
         "score": score,
         "category": category,
-        "recommendations": recommendations,
+        "recommendations": formatted_recommendations,
     }
 
 @router.get("/get_prediction/{prediction_id}")
@@ -72,6 +89,5 @@ async def get_prediction(
         status_code = 404 if result["error"] == "Prediction not found" else 500
         raise HTTPException(status_code=status_code, detail=result["error"])
     
-    # Ensure user_id is included in the response
     result["user_id"] = str(current_user["_id"])
     return result

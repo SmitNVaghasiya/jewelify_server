@@ -87,8 +87,29 @@ class JewelryRLPredictor:
 
         top_indices = np.argsort(q_values)[::-1]
         top_recommendations = [(self.jewelry_names[idx], q_values[idx]) for idx in top_indices[:10]]
-        recommendations = [name for name, _ in top_recommendations]
+        recommendations = [
+            {
+                "name": name,
+                "url": None,  # URL will be filled by database lookup
+                "score": float(q_value),  # Use Q-value as the recommendation score
+                "category": self.compute_category(q_value)  # Compute category based on Q-value
+            }
+            for name, q_value in top_recommendations
+        ]
         return scaled_score, category, recommendations
+
+    def compute_category(self, score: float) -> str:
+        """Helper function to compute category based on score."""
+        if score >= 0.8:
+            return "Very Good"
+        elif score >= 0.6:
+            return "Good"
+        elif score >= 0.4:
+            return "Neutral"
+        elif score >= 0.2:
+            return "Bad"
+        else:
+            return "Very Bad"
 
 def get_predictor(model_path, scaler_path, pairwise_features_path):
     try:
