@@ -18,14 +18,14 @@ class UserRegister(BaseModel):
     username: str
     mobileNo: str
     password: str
-    id: str  # Firebase UID
+    id: str  # Firebase UID, will be ignored in storage
 
 class UserOut(BaseModel):
     id: str
     username: str
     mobileNo: str
     created_at: str
-    access_token: str = None  # Optional, since it’s in headers for /me
+    access_token: str = None  # Optional, included in /register response
 
 class OtpRequest(BaseModel):
     mobileNo: str
@@ -61,16 +61,14 @@ async def register(user: UserRegister):
         logger.error(f"Database connection error: {e}")
         raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
 
+    # Check for existing username or mobile number
     if db["users"].find_one({"username": user.username}):
         raise HTTPException(status_code=400, detail="Username already exists")
     if db["users"].find_one({"mobileNo": user.mobileNo}):
         raise HTTPException(status_code=400, detail="Mobile number already exists")
-    if db["users"].find_one({"firebase_uid": user.id}):
-        raise HTTPException(status_code=400, detail="Firebase UID already registered")
 
     hashed_password = hash_password(user.password)
     user_data = {
-        "firebase_uid": user.id,
         "username": user.username,
         "mobileNo": user.mobileNo,
         "hashed_password": hashed_password,
