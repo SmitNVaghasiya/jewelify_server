@@ -79,12 +79,6 @@ class JewelryRLPredictor:
             category = "Very Bad"
 
         print(f"Category: {category}, Normalized Score: {scaled_score:.2f}%")
-        with tf.device(self.device):
-            q_values = self.model.predict(face_features, verbose=0)[0]
-
-        if len(q_values) != len(self.jewelry_names):
-            print("❌ Error: Q-values length does not match jewelry list.")
-            return scaled_score, category, []
 
         # Compute compatibility for each recommendation using cosine similarity
         recommendations = []
@@ -94,16 +88,23 @@ class JewelryRLPredictor:
             rec_cosine_similarity = np.sum(face_features_norm * jewel_features_norm, axis=1)[0]
             rec_score = min(max((rec_cosine_similarity + 1) / 2.0, 0.0), 1.0) * 100.0
             rec_category = self.compute_category(rec_score)
-            recommendations.append({
-                "name": jewel_name,
-                "url": None,  # URL will be filled by database lookup
-                "score": round(rec_score, 2),  # Round to 2 decimal places
-                "category": rec_category
-            })
+            # Only include recommendations with a score >= 60 (Good or better)
+            if rec_score >= 60.0:
+                recommendations.append({
+                    "name": jewel_name,
+                    "url": None,  # URL will be filled by database lookup
+                    "score": round(rec_score, 2),  # Round to 2 decimal places
+                    "category": rec_category
+                })
 
         # Sort recommendations by score in descending order
         recommendations.sort(key=lambda x: x["score"], reverse=True)
-        recommendations = recommendations[:10]  # Top 10 recommendations
+        # Limit to top 10, but only if they meet the threshold
+        recommendations = recommendations[:10]
+
+        print(f"Found {len(recommendations)} recommendations with compatibility score >= 60%")
+        if len(recommendations) == 0:
+            print("No recommendations meet the minimum compatibility threshold of 60%")
 
         return round(scaled_score, 2), category, recommendations
 
