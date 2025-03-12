@@ -52,7 +52,7 @@ async def predict(
         {
             "name": rec["name"],
             "url": rec.get("url"),
-            "score": rec.get("score", score),
+            "score": rec.get("score", score),  # Already normalized to 0-100%
             "category": rec.get("category", category)
         }
         for rec in recommendations
@@ -76,8 +76,8 @@ async def predict(
         "score": score,
         "category": category,
         "recommendations": formatted_recommendations,
-        "face_image_path": face_image_path,  # Return local path
-        "jewelry_image_path": jewelry_image_path  # Return local path
+        "face_image_path": face_image_path,  # Include in response
+        "jewelry_image_path": jewelry_image_path  # Include in response
     }
 
 @router.get("/get_prediction/{prediction_id}")

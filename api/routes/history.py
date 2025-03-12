@@ -54,8 +54,8 @@ async def get_user_history(current_user: dict = Depends(get_current_user)):
             "score": pred["score"],
             "category": pred["category"],
             "recommendations": formatted_recommendations,
-            "face_image_path": pred.get("face_image"),  # Return local path
-            "jewelry_image_path": pred.get("jewelry_image"),  # Return local path
+            "face_image_path": pred.get("face_image_path"),  # Include in response
+            "jewelry_image_path": pred.get("jewelry_image_path"),  # Include in response
             "timestamp": pred["timestamp"]
         })
 

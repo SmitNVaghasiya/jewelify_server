@@ -64,20 +64,21 @@ class JewelryRLPredictor:
         face_norm = face_features / np.linalg.norm(face_features, axis=1, keepdims=True)
         jewel_norm = jewel_features / np.linalg.norm(jewel_features, axis=1, keepdims=True)
         cosine_similarity = np.sum(face_norm * jewel_norm, axis=1)[0]
-        scaled_score = (cosine_similarity + 1) / 2.0
+        # Normalize scaled_score to 0-1 range and convert to 0-100%
+        scaled_score = min(max((cosine_similarity + 1) / 2.0, 0.0), 1.0) * 100.0
 
-        if scaled_score >= 0.8:
+        if scaled_score >= 80.0:
             category = "Very Good"
-        elif scaled_score >= 0.6:
+        elif scaled_score >= 60.0:
             category = "Good"
-        elif scaled_score >= 0.4:
+        elif scaled_score >= 40.0:
             category = "Neutral"
-        elif scaled_score >= 0.2:
+        elif scaled_score >= 20.0:
             category = "Bad"
         else:
             category = "Very Bad"
 
-        print(f"Category: {category}")
+        print(f"Category: {category}, Normalized Score: {scaled_score}%")
         with tf.device(self.device):
             q_values = self.model.predict(face_features, verbose=0)[0]
 
@@ -91,22 +92,22 @@ class JewelryRLPredictor:
             {
                 "name": name,
                 "url": None,  # URL will be filled by database lookup
-                "score": float(q_value),  # Use Q-value as the recommendation score
-                "category": self.compute_category(q_value)  # Compute category based on Q-value
+                "score": min(max(float(q_value), 0.0), 1.0) * 100.0,  # Normalize Q-value to 0-100%
+                "category": self.compute_category(float(q_value) * 100.0)  # Use normalized score for category
             }
             for name, q_value in top_recommendations
         ]
         return scaled_score, category, recommendations
 
     def compute_category(self, score: float) -> str:
-        """Helper function to compute category based on score."""
-        if score >= 0.8:
+        """Helper function to compute category based on score (0-100%)."""
+        if score >= 80.0:
             return "Very Good"
-        elif score >= 0.6:
+        elif score >= 60.0:
             return "Good"
-        elif score >= 0.4:
+        elif score >= 40.0:
             return "Neutral"
-        elif score >= 0.2:
+        elif score >= 20.0:
             return "Bad"
         else:
             return "Very Bad"

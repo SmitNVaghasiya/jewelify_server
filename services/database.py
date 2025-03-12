@@ -40,7 +40,7 @@ def rebuild_client():
         logger.error(f"🚨 Failed to rebuild MongoDB client: {e}")
         return False
 
-def save_prediction(score, category, recommendations, user_id, face_data=None, jewelry_data=None):
+def save_prediction(score, category, recommendations, user_id, face_image_path=None, jewelry_image_path=None):
     client = get_db_client()
     if not client:
         logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
@@ -52,17 +52,13 @@ def save_prediction(score, category, recommendations, user_id, face_data=None, j
         db = client["jewelify"]
         collection = db["recommendations"]
 
-        # Store local paths instead of binary data
-        face_url = face_data if face_data else None  # Expecting a path string
-        jewelry_url = jewelry_data if jewelry_data else None  # Expecting a path string
-
         prediction = {
             "user_id": ObjectId(user_id),
             "score": score,
             "category": category,
             "recommendations": recommendations,
-            "face_image": face_url,  # Store local path
-            "jewelry_image": jewelry_url,  # Store local path
+            "face_image_path": face_image_path,  # Store local path
+            "jewelry_image_path": jewelry_image_path,  # Store local path
             "timestamp": datetime.utcnow().isoformat()
         }
         result = collection.insert_one(prediction)
@@ -83,7 +79,6 @@ def get_prediction_by_id(prediction_id, user_id):
     try:
         db = client["jewelify"]
         predictions_collection = db["recommendations"]
-        images_collection = db["images"]
 
         prediction = predictions_collection.find_one({
             "_id": ObjectId(prediction_id),
@@ -93,36 +88,13 @@ def get_prediction_by_id(prediction_id, user_id):
             logger.warning(f"⚠️ Prediction with ID {prediction_id} not found for user {user_id}")
             return {"error": "Prediction not found"}
 
-        # Fetch recommendation images
-        recommendations = prediction.get("recommendations", [])
-        image_data = []
-        for rec in recommendations:
-            image_doc = images_collection.find_one({"name": rec["name"]})
-            url = image_doc["url"] if image_doc and "url" in image_doc else None
-            image_data.append({
-                "name": rec["name"],
-                "url": url,
-                "score": rec.get("score", prediction.get("score", 0.0)),
-                "category": rec.get("category", prediction.get("category", "Not Assigned"))
-            })
-
-        # Fetch face and jewelry images
-        face_url = None
-        jewelry_url = None
-        if prediction.get("face_image"):
-            face_doc = images_collection.find_one({"name": prediction["face_image"]})
-            face_url = face_doc["url"] if face_doc and "url" in face_doc else None
-        if prediction.get("jewelry_image"):
-            jewelry_doc = images_collection.find_one({"name": prediction["jewelry_image"]})
-            jewelry_url = jewelry_doc["url"] if jewelry_doc and "url" in jewelry_doc else None
-
         result = {
             "id": str(prediction["_id"]),
             "score": prediction["score"],
             "category": prediction["category"],
-            "recommendations": image_data,
-            "face_image": face_url,
-            "jewelry_image": jewelry_url,
+            "recommendations": prediction.get("recommendations", []),
+            "face_image_path": prediction.get("face_image_path"),  # Include local path
+            "jewelry_image_path": prediction.get("jewelry_image_path"),  # Include local path
             "timestamp": prediction["timestamp"]
         }
         logger.info(f"✅ Retrieved prediction with ID: {prediction_id} for user {user_id}")
@@ -142,7 +114,6 @@ def get_user_predictions(user_id):
     try:
         db = client["jewelify"]
         predictions_collection = db["recommendations"]
-        images_collection = db["images"]
 
         predictions = list(predictions_collection.find({"user_id": ObjectId(user_id)}).sort("timestamp", -1))
         if not predictions:
@@ -152,34 +123,13 @@ def get_user_predictions(user_id):
         results = []
         for prediction in predictions:
             recommendations = prediction.get("recommendations", [])
-            image_data = []
-            for rec in recommendations:
-                image_doc = images_collection.find_one({"name": rec["name"]})
-                url = image_doc["url"] if image_doc and "url" in image_doc else None
-                image_data.append({
-                    "name": rec["name"],
-                    "url": url,
-                    "score": rec.get("score", prediction.get("score", 0.0)),
-                    "category": rec.get("category", prediction.get("category", "Not Assigned"))
-                })
-
-            # Fetch face and jewelry images
-            face_url = None
-            jewelry_url = None
-            if prediction.get("face_image"):
-                face_doc = images_collection.find_one({"name": prediction["face_image"]})
-                face_url = face_doc["url"] if face_doc and "url" in face_doc else None
-            if prediction.get("jewelry_image"):
-                jewelry_doc = images_collection.find_one({"name": prediction["jewelry_image"]})
-                jewelry_url = jewelry_doc["url"] if jewelry_doc and "url" in jewelry_doc else None
-
             results.append({
                 "id": str(prediction["_id"]),
                 "score": prediction["score"],
                 "category": prediction["category"],
-                "recommendations": image_data,
-                "face_image": face_url,
-                "jewelry_image": jewelry_url,
+                "recommendations": recommendations,
+                "face_image_path": prediction.get("face_image_path"),  # Include local path
+                "jewelry_image_path": prediction.get("jewelry_image_path"),  # Include local path
                 "timestamp": prediction["timestamp"]
             })
 
