@@ -64,7 +64,7 @@ class JewelryRLPredictor:
         face_norm = face_features / np.linalg.norm(face_features, axis=1, keepdims=True)
         jewel_norm = jewel_features / np.linalg.norm(jewel_features, axis=1, keepdims=True)
         cosine_similarity = np.sum(face_norm * jewel_norm, axis=1)[0]
-        # Normalize scaled_score to 0-1 range and convert to 0-100%
+        # Normalize scaled_score to 0-100% range
         scaled_score = min(max((cosine_similarity + 1) / 2.0, 0.0), 1.0) * 100.0
 
         if scaled_score >= 80.0:
@@ -78,7 +78,7 @@ class JewelryRLPredictor:
         else:
             category = "Very Bad"
 
-        print(f"Category: {category}, Normalized Score: {scaled_score}%")
+        print(f"Category: {category}, Normalized Score: {scaled_score:.2f}%")
         with tf.device(self.device):
             q_values = self.model.predict(face_features, verbose=0)[0]
 
@@ -86,18 +86,26 @@ class JewelryRLPredictor:
             print("❌ Error: Q-values length does not match jewelry list.")
             return scaled_score, category, []
 
-        top_indices = np.argsort(q_values)[::-1]
-        top_recommendations = [(self.jewelry_names[idx], q_values[idx]) for idx in top_indices[:10]]
-        recommendations = [
-            {
-                "name": name,
+        # Compute compatibility for each recommendation using cosine similarity
+        recommendations = []
+        face_features_norm = face_features / np.linalg.norm(face_features, axis=1, keepdims=True)
+        for idx, (jewel_name, jewel_feature) in enumerate(zip(self.jewelry_names, self.jewelry_list)):
+            jewel_features_norm = jewel_feature / np.linalg.norm(jewel_feature, axis=1, keepdims=True)
+            rec_cosine_similarity = np.sum(face_features_norm * jewel_features_norm, axis=1)[0]
+            rec_score = min(max((rec_cosine_similarity + 1) / 2.0, 0.0), 1.0) * 100.0
+            rec_category = self.compute_category(rec_score)
+            recommendations.append({
+                "name": jewel_name,
                 "url": None,  # URL will be filled by database lookup
-                "score": min(max(float(q_value), 0.0), 1.0) * 100.0,  # Normalize Q-value to 0-100%
-                "category": self.compute_category(float(q_value) * 100.0)  # Use normalized score for category
-            }
-            for name, q_value in top_recommendations
-        ]
-        return scaled_score, category, recommendations
+                "score": round(rec_score, 2),  # Round to 2 decimal places
+                "category": rec_category
+            })
+
+        # Sort recommendations by score in descending order
+        recommendations.sort(key=lambda x: x["score"], reverse=True)
+        recommendations = recommendations[:10]  # Top 10 recommendations
+
+        return round(scaled_score, 2), category, recommendations
 
     def compute_category(self, score: float) -> str:
         """Helper function to compute category based on score (0-100%)."""

@@ -47,12 +47,12 @@ async def predict(
     if score is None:
         raise HTTPException(status_code=500, detail="Prediction failed")
 
-    # Ensure recommendations include score and category
+    # Ensure recommendations include score and category with 2 decimal places
     formatted_recommendations = [
         {
             "name": rec["name"],
             "url": rec.get("url"),
-            "score": rec.get("score", score),  # Already normalized to 0-100%
+            "score": round(rec.get("score", score), 2),  # Round to 2 decimal places
             "category": rec.get("category", category)
         }
         for rec in recommendations
@@ -73,7 +73,7 @@ async def predict(
     return {
         "prediction_id": prediction_id,
         "user_id": str(current_user["_id"]),
-        "score": score,
+        "score": round(score, 2),  # Round to 2 decimal places
         "category": category,
         "recommendations": formatted_recommendations,
         "face_image_path": face_image_path,  # Include in response
