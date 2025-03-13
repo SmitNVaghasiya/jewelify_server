@@ -3,13 +3,18 @@ from services.predictor import get_predictor, predict_both
 from services.database import save_prediction, get_prediction_by_id, save_review
 from api.dependencies import get_current_user
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 predictor = get_predictor(
-    os.getenv("XGBOOST_MODEL_PATH", "xgboost_model.json"),
-    os.getenv("FNN_MODEL_PATH", "fnn_model.keras"),
-    os.getenv("SCALER_PATH", "scaler.pkl"),
-    os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+    os.getenv("XGBOOST_MODEL_PATH", "models/xgboost_jewelry_v1.model"),
+    os.getenv("FNN_MODEL_PATH", "models/FNN_improved_v5.keras"),
+    os.getenv("XGBOOST_SCALER_PATH", "models/scaler_xgboost_v1.pkl"),
+    os.getenv("FNN_SCALER_PATH", "models/FNN_improved_v5_scaler.pkl"),
+    os.getenv("PAIRWISE_FEATURES_PATH", "models/pairwise_features.npy")
 )
 
 @router.post("/predict")
@@ -23,10 +28,11 @@ async def predict(
     global predictor
     if predictor is None:
         predictor = get_predictor(
-            os.getenv("XGBOOST_MODEL_PATH", "xgboost_model.json"),
-            os.getenv("FNN_MODEL_PATH", "fnn_model.keras"),
-            os.getenv("SCALER_PATH", "scaler.pkl"),
-            os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+            os.getenv("XGBOOST_MODEL_PATH", "models/xgboost_jewelry_v1.model"),
+            os.getenv("FNN_MODEL_PATH", "models/FNN_improved_v5.keras"),
+            os.getenv("XGBOOST_SCALER_PATH", "models/scaler_xgboost_v1.pkl"),
+            os.getenv("FNN_SCALER_PATH", "models/FNN_improved_v5_scaler.pkl"),
+            os.getenv("PAIRWISE_FEATURES_PATH", "models/pairwise_features.npy")
         )
         if predictor is None:
             raise HTTPException(status_code=500, detail="Model is not loaded properly")
