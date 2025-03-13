@@ -5,11 +5,9 @@ from dotenv import load_dotenv
 import logging
 from bson import ObjectId
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
@@ -20,32 +18,32 @@ def get_db_client():
         try:
             client = MongoClient(MONGO_URI)
             client.admin.command('ping')
-            logger.info("✅ Successfully connected to MongoDB Atlas!")
+            logger.info("Successfully connected to MongoDB Atlas!")
         except Exception as e:
-            logger.error(f"🚨 Failed to connect to MongoDB Atlas: {e}")
+            logger.error(f"Failed to connect to MongoDB Atlas: {e}")
             client = None
     return client
 
 def rebuild_client():
     global client, MONGO_URI
     if not MONGO_URI:
-        logger.error("🚨 Cannot rebuild client: MONGO_URI not found")
+        logger.error("Cannot rebuild client: MONGO_URI not found")
         return False
     try:
         client = MongoClient(MONGO_URI)
         client.admin.command('ping')
-        logger.info("✅ Successfully rebuilt MongoDB client")
+        logger.info("Successfully rebuilt MongoDB client")
         return True
     except Exception as e:
-        logger.error(f"🚨 Failed to rebuild MongoDB client: {e}")
+        logger.error(f"Failed to rebuild MongoDB client: {e}")
         return False
 
-def save_prediction(score, category, recommendations, user_id, face_image_path=None, jewelry_image_path=None):
+def save_prediction(xgboost_score, xgboost_category, xgboost_recommendations, fnn_score, fnn_category, fnn_recommendations, user_id, face_image_path, jewelry_image_path):
     client = get_db_client()
     if not client:
-        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        logger.warning("No MongoDB client available, attempting to rebuild")
         if not rebuild_client():
-            logger.error("❌ Failed to rebuild MongoDB client, cannot save prediction")
+            logger.error("Failed to rebuild MongoDB client, cannot save prediction")
             return None
 
     try:
@@ -54,87 +52,140 @@ def save_prediction(score, category, recommendations, user_id, face_image_path=N
 
         prediction = {
             "user_id": ObjectId(user_id),
-            "score": score,
-            "category": category,
-            "recommendations": recommendations,
-            "face_image_path": face_image_path,  # Store local path
-            "jewelry_image_path": jewelry_image_path,  # Store local path
+            "xgboost_score": xgboost_score,
+            "xgboost_category": xgboost_category,
+            "xgboost_recommendations": xgboost_recommendations,
+            "fnn_score": fnn_score,
+            "fnn_category": fnn_category,
+            "fnn_recommendations": fnn_recommendations,
+            "face_image_path": face_image_path,
+            "jewelry_image_path": jewelry_image_path,
             "timestamp": datetime.utcnow().isoformat()
         }
         result = collection.insert_one(prediction)
-        logger.info(f"✅ Saved prediction with ID: {result.inserted_id}")
+        logger.info(f"Saved prediction with ID: {result.inserted_id}")
         return str(result.inserted_id)
     except Exception as e:
-        logger.error(f"❌ Error saving prediction to MongoDB: {e}")
+        logger.error(f"Error saving prediction to MongoDB: {e}")
         return None
 
 def get_prediction_by_id(prediction_id, user_id):
     client = get_db_client()
     if not client:
-        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        logger.warning("No MongoDB client available, attempting to rebuild")
         if not rebuild_client():
-            logger.error("❌ Failed to rebuild MongoDB client, cannot retrieve prediction")
+            logger.error("Failed to rebuild MongoDB client, cannot retrieve prediction")
             return {"error": "Database connection error"}
 
     try:
         db = client["jewelify"]
         predictions_collection = db["recommendations"]
+        reviews_collection = db["reviews"]
 
         prediction = predictions_collection.find_one({
             "_id": ObjectId(prediction_id),
             "user_id": ObjectId(user_id)
         })
         if not prediction:
-            logger.warning(f"⚠️ Prediction with ID {prediction_id} not found for user {user_id}")
+            logger.warning(f"Prediction with ID {prediction_id} not found for user {user_id}")
             return {"error": "Prediction not found"}
+
+        # Fetch individual recommendation feedback
+        recommendation_reviews = list(reviews_collection.find({
+            "prediction_id": ObjectId(prediction_id),
+            "user_id": ObjectId(user_id),
+            "feedback_type": "recommendation"
+        }))
+        individual_feedback = {"prediction1": {}, "prediction2": {}}
+        for review in recommendation_reviews:
+            model_type = review["model_type"]
+            if model_type in individual_feedback:
+                individual_feedback[model_type][review["recommendation_name"]] = review["review"]
+
+        # Fetch overall prediction feedback
+        prediction_reviews = list(reviews_collection.find({
+            "prediction_id": ObjectId(prediction_id),
+            "user_id": ObjectId(user_id),
+            "feedback_type": "prediction"
+        }))
+        overall_feedback = {"prediction1": "Not Provided", "prediction2": "Not Provided"}
+        for review in prediction_reviews:
+            model_type = review["model_type"]
+            if model_type in overall_feedback:
+                overall_feedback[model_type] = review["review"]
+
+        # Determine liked recommendations (individual feedback takes precedence)
+        liked = {"prediction1": [], "prediction2": []}
+        for model_type, rec_field in [("prediction1", "xgboost_recommendations"), ("prediction2", "fnn_recommendations")]:
+            model_recs = prediction.get(rec_field, [])
+            model_individual_feedback = individual_feedback[model_type]
+            model_overall_feedback = overall_feedback[model_type]
+
+            for rec in model_recs:
+                rec_name = rec["name"]
+                # Check individual feedback first
+                if rec_name in model_individual_feedback:
+                    if model_individual_feedback[rec_name] == "yes":
+                        liked[model_type].append(rec_name)
+                # If no individual feedback, use overall feedback
+                elif model_overall_feedback == "yes":
+                    liked[model_type].append(rec_name)
+
+        # Add liked status to recommendations
+        for model_type, rec_field in [("prediction1", "xgboost_recommendations"), ("prediction2", "fnn_recommendations")]:
+            if rec_field in prediction:
+                for rec in prediction[rec_field]:
+                    rec["liked"] = rec["name"] in liked[model_type]
 
         result = {
             "id": str(prediction["_id"]),
-            "score": prediction["score"],
-            "category": prediction["category"],
-            "recommendations": prediction.get("recommendations", []),
-            "face_image_path": prediction.get("face_image_path"),  # Include local path
-            "jewelry_image_path": prediction.get("jewelry_image_path"),  # Include local path
+            "user_id": str(prediction["user_id"]),
+            "prediction1": {
+                "score": prediction["xgboost_score"],
+                "category": prediction["xgboost_category"],
+                "recommendations": prediction["xgboost_recommendations"],
+                "overall_feedback": overall_feedback["prediction1"]
+            },
+            "prediction2": {
+                "score": prediction["fnn_score"],
+                "category": prediction["fnn_category"],
+                "recommendations": prediction["fnn_recommendations"],
+                "overall_feedback": overall_feedback["prediction2"]
+            },
+            "face_image_path": prediction.get("face_image_path"),
+            "jewelry_image_path": prediction.get("jewelry_image_path"),
             "timestamp": prediction["timestamp"]
         }
-        logger.info(f"✅ Retrieved prediction with ID: {prediction_id} for user {user_id}")
+        logger.info(f"Retrieved prediction with ID: {prediction_id} for user {user_id}")
         return result
     except Exception as e:
-        logger.error(f"❌ Error retrieving prediction from MongoDB: {e}")
+        logger.error(f"Error retrieving prediction from MongoDB: {e}")
         return {"error": f"Database error: {str(e)}"}
 
-def get_user_predictions(user_id):
+def save_review(user_id, prediction_id, model_type, recommendation_name, review, feedback_type):
     client = get_db_client()
     if not client:
-        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        logger.warning("No MongoDB client available, attempting to rebuild")
         if not rebuild_client():
-            logger.error("❌ Failed to rebuild MongoDB client, cannot retrieve predictions")
-            return {"error": "Database connection error"}
+            logger.error("Failed to rebuild MongoDB client, cannot save review")
+            return False
 
     try:
         db = client["jewelify"]
-        predictions_collection = db["recommendations"]
+        reviews_collection = db["reviews"]
 
-        predictions = list(predictions_collection.find({"user_id": ObjectId(user_id)}).sort("timestamp", -1))
-        if not predictions:
-            logger.warning(f"⚠️ No predictions found for user {user_id}")
-            return {"error": "No predictions found"}
-
-        results = []
-        for prediction in predictions:
-            recommendations = prediction.get("recommendations", [])
-            results.append({
-                "id": str(prediction["_id"]),
-                "score": prediction["score"],
-                "category": prediction["category"],
-                "recommendations": recommendations,
-                "face_image_path": prediction.get("face_image_path"),  # Include local path
-                "jewelry_image_path": prediction.get("jewelry_image_path"),  # Include local path
-                "timestamp": prediction["timestamp"]
-            })
-
-        logger.info(f"✅ Retrieved {len(results)} predictions for user {user_id}")
-        return results
+        review_doc = {
+            "user_id": ObjectId(user_id),
+            "prediction_id": ObjectId(prediction_id),
+            "model_type": model_type,
+            "recommendation_name": recommendation_name,
+            "review": review,
+            "feedback_type": feedback_type,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        result = reviews_collection.insert_one(review_doc)
+        logger.info(f"Saved review with ID: {result.inserted_id}")
+        return True
     except Exception as e:
-        logger.error(f"❌ Error retrieving predictions from MongoDB: {e}")
-        return {"error": f"Database error: {str(e)}"}
+        logger.error(f"Error saving review to MongoDB: {e}")
+        return False

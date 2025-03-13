@@ -1,13 +1,13 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
-from services.predictor import get_predictor, predict_compatibility
-from services.database import save_prediction, get_prediction_by_id
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Form
+from services.predictor import get_predictor, predict_both
+from services.database import save_prediction, get_prediction_by_id, save_review
 from api.dependencies import get_current_user
 import os
-from fastapi import Form
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 predictor = get_predictor(
-    os.getenv("MODEL_PATH", "rl_jewelry_model.keras"),
+    os.getenv("XGBOOST_MODEL_PATH", "xgboost_model.json"),
+    os.getenv("FNN_MODEL_PATH", "fnn_model.keras"),
     os.getenv("SCALER_PATH", "scaler.pkl"),
     os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
 )
@@ -16,14 +16,15 @@ predictor = get_predictor(
 async def predict(
     face: UploadFile = File(...),
     jewelry: UploadFile = File(...),
-    face_image_path: str = Form(...),  # Receive local path
-    jewelry_image_path: str = Form(...),  # Receive local path
+    face_image_path: str = Form(...),
+    jewelry_image_path: str = Form(...),
     current_user: dict = Depends(get_current_user)
 ):
     global predictor
     if predictor is None:
         predictor = get_predictor(
-            os.getenv("MODEL_PATH", "rl_jewelry_model.keras"),
+            os.getenv("XGBOOST_MODEL_PATH", "xgboost_model.json"),
+            os.getenv("FNN_MODEL_PATH", "fnn_model.keras"),
             os.getenv("SCALER_PATH", "scaler.pkl"),
             os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
         )
@@ -40,44 +41,39 @@ async def predict(
         raise HTTPException(status_code=400, detail=f"Failed to read uploaded images: {str(e)}")
 
     try:
-        score, category, recommendations = predict_compatibility(predictor, face_data, jewelry_data)
+        xgboost_score, xgboost_category, xgboost_recommendations, fnn_score, fnn_category, fnn_recommendations = predict_both(predictor, face_data, jewelry_data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
-    
-    if score is None:
-        raise HTTPException(status_code=500, detail="Prediction failed")
 
-    # Ensure recommendations include score and category with 2 decimal places
-    formatted_recommendations = [
-        {
-            "name": rec["name"],
-            "url": rec.get("url"),
-            "score": round(rec.get("score", score), 2),  # Round to 2 decimal places
-            "category": rec.get("category", category)
-        }
-        for rec in recommendations
-    ]
+    if xgboost_score is None or fnn_score is None:
+        raise HTTPException(status_code=500, detail="Prediction failed")
 
     try:
         prediction_id = save_prediction(
-            score,
-            category,
-            formatted_recommendations,
+            xgboost_score, xgboost_category, xgboost_recommendations,
+            fnn_score, fnn_category, fnn_recommendations,
             str(current_user["_id"]),
-            face_image_path,  # Store local path
-            jewelry_image_path  # Store local path
+            face_image_path,
+            jewelry_image_path
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save prediction: {str(e)}")
-    
+
     return {
         "prediction_id": prediction_id,
         "user_id": str(current_user["_id"]),
-        "score": round(score, 2),  # Round to 2 decimal places
-        "category": category,
-        "recommendations": formatted_recommendations,
-        "face_image_path": face_image_path,  # Include in response
-        "jewelry_image_path": jewelry_image_path  # Include in response
+        "prediction1": {
+            "score": round(xgboost_score, 2),
+            "category": xgboost_category,
+            "recommendations": xgboost_recommendations
+        },
+        "prediction2": {
+            "score": round(fnn_score, 2),
+            "category": fnn_category,
+            "recommendations": fnn_recommendations
+        },
+        "face_image_path": face_image_path,
+        "jewelry_image_path": jewelry_image_path
     }
 
 @router.get("/get_prediction/{prediction_id}")
@@ -89,10 +85,65 @@ async def get_prediction(
         result = get_prediction_by_id(prediction_id, str(current_user["_id"]))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
+
     if "error" in result:
         status_code = 404 if result["error"] == "Prediction not found" else 500
         raise HTTPException(status_code=status_code, detail=result["error"])
-    
+
     result["user_id"] = str(current_user["_id"])
     return result
+
+@router.post("/feedback/recommendation")
+async def submit_recommendation_feedback(
+    prediction_id: str = Form(...),
+    model_type: str = Form(...),  # "prediction1" or "prediction2"
+    recommendation_name: str = Form(...),
+    review: str = Form(...),  # "yes", "no", "neutral"
+    current_user: dict = Depends(get_current_user)
+):
+    valid_reviews = {"yes", "no", "neutral"}
+    if review not in valid_reviews:
+        raise HTTPException(status_code=400, detail="Review must be 'yes', 'no', or 'neutral'")
+
+    if model_type not in ["prediction1", "prediction2"]:
+        raise HTTPException(status_code=400, detail="Model type must be 'prediction1' or 'prediction2'")
+
+    success = save_review(
+        str(current_user["_id"]),
+        prediction_id,
+        model_type,
+        recommendation_name,
+        review,
+        feedback_type="recommendation"
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save review")
+
+    return {"message": "Recommendation review saved successfully"}
+
+@router.post("/feedback/prediction")
+async def submit_prediction_feedback(
+    prediction_id: str = Form(...),
+    model_type: str = Form(...),  # "prediction1" or "prediction2"
+    review: str = Form(...),  # "yes", "no", "neutral"
+    current_user: dict = Depends(get_current_user)
+):
+    valid_reviews = {"yes", "no", "neutral"}
+    if review not in valid_reviews:
+        raise HTTPException(status_code=400, detail="Review must be 'yes', 'no', or 'neutral'")
+
+    if model_type not in ["prediction1", "prediction2"]:
+        raise HTTPException(status_code=400, detail="Model type must be 'prediction1' or 'prediction2'")
+
+    success = save_review(
+        str(current_user["_id"]),
+        prediction_id,
+        model_type,
+        recommendation_name=None,
+        review=review,
+        feedback_type="prediction"
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save review")
+
+    return {"message": "Prediction review saved successfully"}

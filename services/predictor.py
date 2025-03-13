@@ -1,39 +1,45 @@
 import os
 import numpy as np
+import xgboost as xgb
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.models import load_model, Model
+from tensorflow.keras.layers import GlobalAveragePooling2D, Dense
 import pickle
 from io import BytesIO
 
-class JewelryRLPredictor:
-    def __init__(self, model_path, scaler_path, pairwise_features_path):
-        for path in [model_path, scaler_path, pairwise_features_path]:
+class JewelryPredictor:
+    def __init__(self, xgboost_model_path, fnn_model_path, scaler_path, pairwise_features_path):
+        for path in [xgboost_model_path, fnn_model_path, scaler_path, pairwise_features_path]:
             if not os.path.exists(path):
                 raise FileNotFoundError(f"Missing required file: {path}")
 
-        print("🚀 Loading model...")
-        self.model = load_model(model_path)
+        print("Loading XGBoost model...")
+        self.xgboost_model = xgb.Booster()
+        self.xgboost_model.load_model(xgboost_model_path)
+
+        print("Loading FNN model...")
+        self.fnn_model = load_model(fnn_model_path)
         self.img_size = (224, 224)
         self.feature_size = 1280
         self.device = "/GPU:0" if tf.config.list_physical_devices('GPU') else "/CPU:0"
 
-        print("📏 Loading scaler...")
+        print("Loading scaler...")
         with open(scaler_path, 'rb') as f:
             self.scaler = pickle.load(f)
 
-        print("🔄 Setting up MobileNetV2 feature extractor...")
+        print("Setting up MobileNetV2 feature extractor...")
         base_model = MobileNetV2(weights="imagenet", include_top=False, input_shape=(224, 224, 3))
-        global_avg_layer = tf.keras.layers.GlobalAveragePooling2D()
-        reduction_layer = tf.keras.layers.Dense(self.feature_size, activation="relu")
+        global_avg_layer = GlobalAveragePooling2D()
+        reduction_layer = Dense(self.feature_size, activation="relu")
         self.feature_extractor = Model(
             inputs=base_model.input,
             outputs=reduction_layer(global_avg_layer(base_model.output))
         )
 
-        print("📂 Loading pairwise features...")
+        print("Loading pairwise features...")
         self.pairwise_features = np.load(pairwise_features_path, allow_pickle=True).item()
         self.pairwise_features = {
             k: self.scaler.transform(np.array(v).reshape(1, -1))
@@ -41,7 +47,7 @@ class JewelryRLPredictor:
         }
         self.jewelry_list = list(self.pairwise_features.values())
         self.jewelry_names = list(self.pairwise_features.keys())
-        print("✅ Predictor initialized successfully!")
+        print("Predictor initialized successfully!")
 
     def extract_features(self, img_data):
         try:
@@ -52,64 +58,49 @@ class JewelryRLPredictor:
             features = self.feature_extractor.predict(img_array, verbose=0)
             return self.scaler.transform(features)
         except Exception as e:
-            print(f"❌ Error extracting features: {e}")
+            print(f"Error extracting features: {e}")
             return None
 
-    def predict_compatibility(self, face_data, jewel_data):
-        face_features = self.extract_features(face_data)
-        jewel_features = self.extract_features(jewel_data)
-        if face_features is None or jewel_features is None:
-            return None, "Feature extraction failed", []
+    def combine_features(self, face_features, jewelry_features):
+        return np.concatenate((face_features, jewelry_features), axis=1)
 
-        face_norm = face_features / np.linalg.norm(face_features, axis=1, keepdims=True)
-        jewel_norm = jewel_features / np.linalg.norm(jewel_features, axis=1, keepdims=True)
-        cosine_similarity = np.sum(face_norm * jewel_norm, axis=1)[0]
-        # Normalize scaled_score to 0-100% range
-        scaled_score = min(max((cosine_similarity + 1) / 2.0, 0.0), 1.0) * 100.0
+    def predict_with_xgboost(self, face_features, jewelry_features):
+        combined_features = self.combine_features(face_features, jewelry_features)
+        dmatrix = xgb.DMatrix(combined_features)
+        score = self.xgboost_model.predict(dmatrix)[0] * 100.0  # Scale to 0-100
+        category = self.compute_category(score)
+        return score, category
 
-        if scaled_score >= 80.0:
-            category = "Very Good"
-        elif scaled_score >= 60.0:
-            category = "Good"
-        elif scaled_score >= 40.0:
-            category = "Neutral"
-        elif scaled_score >= 20.0:
-            category = "Bad"
-        else:
-            category = "Very Bad"
+    def predict_with_fnn(self, face_features, jewelry_features):
+        combined_features = self.combine_features(face_features, jewelry_features)
+        with tf.device(self.device):
+            score = self.fnn_model.predict(combined_features, verbose=0)[0][0] * 100.0  # Scale to 0-100
+        category = self.compute_category(score)
+        return score, category
 
-        print(f"Category: {category}, Normalized Score: {scaled_score:.2f}%")
+    def get_recommendations_with_xgboost(self, face_features):
+        combined_features = [self.combine_features(face_features, jewel_feature) for jewel_feature in self.jewelry_list]
+        combined_features = np.vstack(combined_features)
+        dmatrix = xgb.DMatrix(combined_features)
+        scores = self.xgboost_model.predict(dmatrix) * 100.0
+        indices = np.argsort(scores)[::-1][:20]  # Top 20 recommendations
+        recommendations = [self.jewelry_names[i] for i in indices]
+        rec_scores = scores[indices]
+        rec_categories = [self.compute_category(score) for score in rec_scores]
+        return [{"name": name, "score": round(score, 2), "category": category} for name, score, category in zip(recommendations, rec_scores, rec_categories)]
 
-        # Compute compatibility for each recommendation using cosine similarity
-        recommendations = []
-        face_features_norm = face_features / np.linalg.norm(face_features, axis=1, keepdims=True)
-        for idx, (jewel_name, jewel_feature) in enumerate(zip(self.jewelry_names, self.jewelry_list)):
-            jewel_features_norm = jewel_feature / np.linalg.norm(jewel_feature, axis=1, keepdims=True)
-            rec_cosine_similarity = np.sum(face_features_norm * jewel_features_norm, axis=1)[0]
-            rec_score = min(max((rec_cosine_similarity + 1) / 2.0, 0.0), 1.0) * 100.0
-            rec_category = self.compute_category(rec_score)
-            # Only include recommendations with a score >= 60 (Good or better)
-            if rec_score >= 60.0:
-                recommendations.append({
-                    "name": jewel_name,
-                    "url": None,  # URL will be filled by database lookup
-                    "score": round(rec_score, 2),  # Round to 2 decimal places
-                    "category": rec_category
-                })
-
-        # Sort recommendations by score in descending order
-        recommendations.sort(key=lambda x: x["score"], reverse=True)
-        # Limit to top 10, but only if they meet the threshold
-        recommendations = recommendations[:10]
-
-        print(f"Found {len(recommendations)} recommendations with compatibility score >= 60%")
-        if len(recommendations) == 0:
-            print("No recommendations meet the minimum compatibility threshold of 60%")
-
-        return round(scaled_score, 2), category, recommendations
+    def get_recommendations_with_fnn(self, face_features):
+        combined_features = [self.combine_features(face_features, jewel_feature) for jewel_feature in self.jewelry_list]
+        combined_features = np.vstack(combined_features)
+        with tf.device(self.device):
+            scores = self.fnn_model.predict(combined_features, verbose=0).flatten() * 100.0
+        indices = np.argsort(scores)[::-1][:20]  # Top 20 recommendations
+        recommendations = [self.jewelry_names[i] for i in indices]
+        rec_scores = scores[indices]
+        rec_categories = [self.compute_category(score) for score in rec_scores]
+        return [{"name": name, "score": round(score, 2), "category": category} for name, score, category in zip(recommendations, rec_scores, rec_categories)]
 
     def compute_category(self, score: float) -> str:
-        """Helper function to compute category based on score (0-100%)."""
         if score >= 80.0:
             return "Very Good"
         elif score >= 60.0:
@@ -121,15 +112,23 @@ class JewelryRLPredictor:
         else:
             return "Very Bad"
 
-def get_predictor(model_path, scaler_path, pairwise_features_path):
+def get_predictor(xgboost_model_path, fnn_model_path, scaler_path, pairwise_features_path):
     try:
-        predictor = JewelryRLPredictor(model_path, scaler_path, pairwise_features_path)
+        predictor = JewelryPredictor(xgboost_model_path, fnn_model_path, scaler_path, pairwise_features_path)
         return predictor
     except Exception as e:
-        print(f"🚨 Failed to initialize JewelryRLPredictor: {e}")
+        print(f"Failed to initialize JewelryPredictor: {e}")
         return None
 
-def predict_compatibility(predictor, face_data, jewelry_data):
+def predict_both(predictor, face_data, jewelry_data):
     if predictor is None:
-        return None, "Predictor not initialized", []
-    return predictor.predict_compatibility(face_data, jewelry_data)
+        return None, "Predictor not initialized", [], None, "Predictor not initialized", []
+    face_features = predictor.extract_features(face_data)
+    jewelry_features = predictor.extract_features(jewelry_data)
+    if face_features is None or jewelry_features is None:
+        return None, "Feature extraction failed", [], None, "Feature extraction failed", []
+    xgboost_score, xgboost_category = predictor.predict_with_xgboost(face_features, jewelry_features)
+    fnn_score, fnn_category = predictor.predict_with_fnn(face_features, jewelry_features)
+    xgboost_recommendations = predictor.get_recommendations_with_xgboost(face_features)
+    fnn_recommendations = predictor.get_recommendations_with_fnn(face_features)
+    return xgboost_score, xgboost_category, xgboost_recommendations, fnn_score, fnn_category, fnn_recommendations

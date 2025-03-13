@@ -1,0 +1,706 @@
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from services.database import get_db_client
+from services.auth import hash_password, create_access_token, verify_password
+from datetime import datetime
+import os
+import logging
+from api.dependencies import get_current_user
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+class UserRegister(BaseModel):
+    username: str
+    mobileNo: str
+    password: str
+    id: str  # Firebase UID, will be ignored in storage
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    mobileNo: str
+    created_at: str
+    access_token: str = None  # Optional, included in /register response
+
+class OtpRequest(BaseModel):
+    mobileNo: str
+
+@router.get("/check-user/{mobile_no}")
+async def check_user(mobile_no: str):
+    """Check if a user exists by mobile number using MongoDB."""
+    try:
+        client = get_db_client()
+        db = client["jewelify"]
+        user = db["users"].find_one({"mobileNo": mobile_no})
+        return {"exists": bool(user)}
+    except Exception as e:
+        logger.error(f"Error checking user: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.post("/send-otp")
+async def send_otp(request: OtpRequest):
+    """Placeholder endpoint for sending OTP (handled by Firebase)."""
+    try:
+        logger.info(f"Request to send OTP for {request.mobileNo} - Handled by Firebase")
+        return {"message": "OTP sending initiated (handled by Firebase)"}
+    except Exception as e:
+        logger.error(f"Error processing OTP request: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process OTP request: {str(e)}")
+
+@router.post("/register", response_model=UserOut)
+async def register(user: UserRegister):
+    try:
+        client = get_db_client()
+        db = client["jewelify"]
+    except Exception as e:
+        logger.error(f"Database connection error: {e}")
+        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
+
+    # Check for existing username or mobile number
+    if db["users"].find_one({"username": user.username}):
+        raise HTTPException(status_code=400, detail="Username already exists")
+    if db["users"].find_one({"mobileNo": user.mobileNo}):
+        raise HTTPException(status_code=400, detail="Mobile number already exists")
+
+    hashed_password = hash_password(user.password)
+    user_data = {
+        "username": user.username,
+        "mobileNo": user.mobileNo,
+        "hashed_password": hashed_password,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+
+    try:
+        result = db["users"].insert_one(user_data)
+        user_id = str(result.inserted_id)
+        access_token = create_access_token(data={"sub": user_id})
+    except Exception as e:
+        logger.error(f"Error registering user: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
+
+    return {
+        "id": user_id,
+        "username": user.username,
+        "mobileNo": user.mobileNo,
+        "created_at": user_data["created_at"],
+        "access_token": access_token,
+    }
+
+@router.post("/login", response_model=UserOut)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Login a user using username/mobileNo and password."""
+    try:
+        client = get_db_client()
+        db = client["jewelify"]
+        user = db["users"].find_one({
+            "$or": [
+                {"username": form_data.username},
+                {"mobileNo": form_data.username}
+            ]
+        })
+    except Exception as e:
+        logger.error(f"Database error during login: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(status_code=400, detail="Incorrect username/mobileNo or password")
+
+    access_token = create_access_token(data={"sub": str(user["_id"])})
+    return {
+        "id": str(user["_id"]),
+        "username": user["username"],
+        "mobileNo": user["mobileNo"],
+        "created_at": user["created_at"],
+        "access_token": access_token,
+    }
+
+
+from fastapi import APIRouter, Depends, HTTPException
+from api.dependencies import get_current_user
+from services.database import get_db_client
+from bson import ObjectId
+
+router = APIRouter(prefix="/history", tags=["history"])
+
+@router.get("/")
+async def get_user_history(current_user: dict = Depends(get_current_user)):
+    client = get_db_client()
+    if not client:
+        return {"error": "Database connection error"}
+
+    try:
+        db = client["jewelify"]
+        predictions_cursor = db["recommendations"].find({"user_id": ObjectId(current_user["_id"])})
+        predictions = list(predictions_cursor.sort("timestamp", -1))
+    except Exception as e:
+        return {"error": "Database error: " + str(e)}
+
+    if not predictions:
+        return {"message": "No predictions found", "recommendations": []}
+
+    results = []
+    for pred in predictions:
+        recommendations = pred.get("recommendations", [])
+        formatted_recommendations = []
+        for item in recommendations:
+            if isinstance(item, str):
+                formatted_recommendations.append({
+                    "name": item,
+                    "url": None,
+                    "score": pred.get("score", 0.0),
+                    "category": pred.get("category", "Not Assigned")
+                })
+            elif isinstance(item, dict) and "name" in item:
+                formatted_recommendations.append({
+                    "name": item["name"],
+                    "url": item.get("url", None),
+                    "score": item.get("score", pred.get("score", 0.0)),
+                    "category": item.get("category", pred.get("category", "Not Assigned"))
+                })
+            else:
+                formatted_recommendations.append({
+                    "name": str(item),
+                    "url": None,
+                    "score": pred.get("score", 0.0),
+                    "category": pred.get("category", "Not Assigned")
+                })
+
+        results.append({
+            "id": str(pred["_id"]),
+            "user_id": str(pred["user_id"]),
+            "score": pred["score"],
+            "category": pred["category"],
+            "recommendations": formatted_recommendations,
+            "face_image_path": pred.get("face_image"),  # Return local path
+            "jewelry_image_path": pred.get("jewelry_image"),  # Return local path
+            "timestamp": pred["timestamp"]
+        })
+
+    return results
+
+
+
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+from services.predictor import get_predictor, predict_compatibility
+from services.database import save_prediction, get_prediction_by_id
+from api.dependencies import get_current_user
+import os
+from fastapi import Form
+
+router = APIRouter(prefix="/predictions", tags=["predictions"])
+predictor = get_predictor(
+    os.getenv("MODEL_PATH", "rl_jewelry_model.keras"),
+    os.getenv("SCALER_PATH", "scaler.pkl"),
+    os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+)
+
+@router.post("/predict")
+async def predict(
+    face: UploadFile = File(...),
+    jewelry: UploadFile = File(...),
+    face_image_path: str = Form(...),  # Receive local path
+    jewelry_image_path: str = Form(...),  # Receive local path
+    current_user: dict = Depends(get_current_user)
+):
+    global predictor
+    if predictor is None:
+        predictor = get_predictor(
+            os.getenv("MODEL_PATH", "rl_jewelry_model.keras"),
+            os.getenv("SCALER_PATH", "scaler.pkl"),
+            os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+        )
+        if predictor is None:
+            raise HTTPException(status_code=500, detail="Model is not loaded properly")
+
+    if not face.content_type.startswith('image/') or not jewelry.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="Uploaded files must be images")
+
+    try:
+        face_data = await face.read()
+        jewelry_data = await jewelry.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read uploaded images: {str(e)}")
+
+    try:
+        score, category, recommendations = predict_compatibility(predictor, face_data, jewelry_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+    
+    if score is None:
+        raise HTTPException(status_code=500, detail="Prediction failed")
+
+    # Ensure recommendations include score and category
+    formatted_recommendations = [
+        {
+            "name": rec["name"],
+            "url": rec.get("url"),
+            "score": rec.get("score", score),
+            "category": rec.get("category", category)
+        }
+        for rec in recommendations
+    ]
+
+    try:
+        prediction_id = save_prediction(
+            score,
+            category,
+            formatted_recommendations,
+            str(current_user["_id"]),
+            face_image_path,  # Store local path
+            jewelry_image_path  # Store local path
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save prediction: {str(e)}")
+    
+    return {
+        "prediction_id": prediction_id,
+        "user_id": str(current_user["_id"]),
+        "score": score,
+        "category": category,
+        "recommendations": formatted_recommendations,
+        "face_image_path": face_image_path,  # Return local path
+        "jewelry_image_path": jewelry_image_path  # Return local path
+    }
+
+@router.get("/get_prediction/{prediction_id}")
+async def get_prediction(
+    prediction_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        result = get_prediction_by_id(prediction_id, str(current_user["_id"]))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+    if "error" in result:
+        status_code = 404 if result["error"] == "Prediction not found" else 500
+        raise HTTPException(status_code=status_code, detail=result["error"])
+    
+    result["user_id"] = str(current_user["_id"])
+    return result
+
+
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from bson import ObjectId
+from services.database import get_db_client
+import os
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+SECRET_KEY = os.getenv("SECRET_KEY", "67c5d8cdc2c70e444d913cf46d6938e4a7574436d302f9063dae3fea50e52430")
+ALGORITHM = "HS256"
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    try:
+        client = get_db_client()
+        db = client["jewelify"]
+        user = db["users"].find_one({"_id": ObjectId(user_id)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+
+# models/user.py
+from bson import ObjectId
+from pydantic import BaseModel, Field, field_validator
+
+class UserRegister(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    mobileNo: str = Field(..., min_length=10, max_length=13)
+    password: str = Field(..., min_length=6)
+    otp: str = Field(..., min_length=6, max_length=6)
+
+    @field_validator("mobileNo")
+    def validate_mobile(cls, v):
+    # Option 1: Allow a leading plus, then digits
+        import re
+        if not re.match(r"^\+?\d+$", v):
+            raise ValueError("Mobile number must contain only digits (optionally with a leading +)")
+        return v
+
+class UserLogin(BaseModel):
+    username_or_mobile: str = Field(..., alias="username")
+    password: str = Field(...)
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    mobileNo: str
+    created_at: str
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+        json_encoders = {ObjectId: str}
+
+
+import os
+from passlib.context import CryptContext
+from jose import jwt
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Load environment variables so that SECRET_KEY is not hardcoded.
+load_dotenv()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SECRET_KEY = os.getenv("SECRET_KEY", "default-secret-key")  # Now loaded from .env
+ALGORITHM = "HS256"
+# Use the environment variable for token expiry if available; otherwise, default to 60 minutes.
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now() + expires_delta
+    else:
+        expire = datetime.now() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+from pymongo import MongoClient
+import os
+from datetime import datetime
+from dotenv import load_dotenv
+import logging
+from bson import ObjectId
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
+MONGO_URI = os.getenv("MONGO_URI")
+client = MongoClient(MONGO_URI)
+
+def get_db_client():
+    global client
+    if client is None:
+        try:
+            client = MongoClient(MONGO_URI)
+            client.admin.command('ping')
+            logger.info("✅ Successfully connected to MongoDB Atlas!")
+        except Exception as e:
+            logger.error(f"🚨 Failed to connect to MongoDB Atlas: {e}")
+            client = None
+    return client
+
+def rebuild_client():
+    global client, MONGO_URI
+    if not MONGO_URI:
+        logger.error("🚨 Cannot rebuild client: MONGO_URI not found")
+        return False
+    try:
+        client = MongoClient(MONGO_URI)
+        client.admin.command('ping')
+        logger.info("✅ Successfully rebuilt MongoDB client")
+        return True
+    except Exception as e:
+        logger.error(f"🚨 Failed to rebuild MongoDB client: {e}")
+        return False
+
+def save_prediction(score, category, recommendations, user_id, face_data=None, jewelry_data=None):
+    client = get_db_client()
+    if not client:
+        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        if not rebuild_client():
+            logger.error("❌ Failed to rebuild MongoDB client, cannot save prediction")
+            return None
+
+    try:
+        db = client["jewelify"]
+        collection = db["recommendations"]
+
+        # Store local paths instead of binary data
+        face_url = face_data if face_data else None  # Expecting a path string
+        jewelry_url = jewelry_data if jewelry_data else None  # Expecting a path string
+
+        prediction = {
+            "user_id": ObjectId(user_id),
+            "score": score,
+            "category": category,
+            "recommendations": recommendations,
+            "face_image": face_url,  # Store local path
+            "jewelry_image": jewelry_url,  # Store local path
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        result = collection.insert_one(prediction)
+        logger.info(f"✅ Saved prediction with ID: {result.inserted_id}")
+        return str(result.inserted_id)
+    except Exception as e:
+        logger.error(f"❌ Error saving prediction to MongoDB: {e}")
+        return None
+
+def get_prediction_by_id(prediction_id, user_id):
+    client = get_db_client()
+    if not client:
+        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        if not rebuild_client():
+            logger.error("❌ Failed to rebuild MongoDB client, cannot retrieve prediction")
+            return {"error": "Database connection error"}
+
+    try:
+        db = client["jewelify"]
+        predictions_collection = db["recommendations"]
+        images_collection = db["images"]
+
+        prediction = predictions_collection.find_one({
+            "_id": ObjectId(prediction_id),
+            "user_id": ObjectId(user_id)
+        })
+        if not prediction:
+            logger.warning(f"⚠️ Prediction with ID {prediction_id} not found for user {user_id}")
+            return {"error": "Prediction not found"}
+
+        # Fetch recommendation images
+        recommendations = prediction.get("recommendations", [])
+        image_data = []
+        for rec in recommendations:
+            image_doc = images_collection.find_one({"name": rec["name"]})
+            url = image_doc["url"] if image_doc and "url" in image_doc else None
+            image_data.append({
+                "name": rec["name"],
+                "url": url,
+                "score": rec.get("score", prediction.get("score", 0.0)),
+                "category": rec.get("category", prediction.get("category", "Not Assigned"))
+            })
+
+        # Fetch face and jewelry images
+        face_url = None
+        jewelry_url = None
+        if prediction.get("face_image"):
+            face_doc = images_collection.find_one({"name": prediction["face_image"]})
+            face_url = face_doc["url"] if face_doc and "url" in face_doc else None
+        if prediction.get("jewelry_image"):
+            jewelry_doc = images_collection.find_one({"name": prediction["jewelry_image"]})
+            jewelry_url = jewelry_doc["url"] if jewelry_doc and "url" in jewelry_doc else None
+
+        result = {
+            "id": str(prediction["_id"]),
+            "score": prediction["score"],
+            "category": prediction["category"],
+            "recommendations": image_data,
+            "face_image": face_url,
+            "jewelry_image": jewelry_url,
+            "timestamp": prediction["timestamp"]
+        }
+        logger.info(f"✅ Retrieved prediction with ID: {prediction_id} for user {user_id}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Error retrieving prediction from MongoDB: {e}")
+        return {"error": f"Database error: {str(e)}"}
+
+def get_user_predictions(user_id):
+    client = get_db_client()
+    if not client:
+        logger.warning("⚠️ No MongoDB client available, attempting to rebuild")
+        if not rebuild_client():
+            logger.error("❌ Failed to rebuild MongoDB client, cannot retrieve predictions")
+            return {"error": "Database connection error"}
+
+    try:
+        db = client["jewelify"]
+        predictions_collection = db["recommendations"]
+        images_collection = db["images"]
+
+        predictions = list(predictions_collection.find({"user_id": ObjectId(user_id)}).sort("timestamp", -1))
+        if not predictions:
+            logger.warning(f"⚠️ No predictions found for user {user_id}")
+            return {"error": "No predictions found"}
+
+        results = []
+        for prediction in predictions:
+            recommendations = prediction.get("recommendations", [])
+            image_data = []
+            for rec in recommendations:
+                image_doc = images_collection.find_one({"name": rec["name"]})
+                url = image_doc["url"] if image_doc and "url" in image_doc else None
+                image_data.append({
+                    "name": rec["name"],
+                    "url": url,
+                    "score": rec.get("score", prediction.get("score", 0.0)),
+                    "category": rec.get("category", prediction.get("category", "Not Assigned"))
+                })
+
+            # Fetch face and jewelry images
+            face_url = None
+            jewelry_url = None
+            if prediction.get("face_image"):
+                face_doc = images_collection.find_one({"name": prediction["face_image"]})
+                face_url = face_doc["url"] if face_doc and "url" in face_doc else None
+            if prediction.get("jewelry_image"):
+                jewelry_doc = images_collection.find_one({"name": prediction["jewelry_image"]})
+                jewelry_url = jewelry_doc["url"] if jewelry_doc and "url" in jewelry_doc else None
+
+            results.append({
+                "id": str(prediction["_id"]),
+                "score": prediction["score"],
+                "category": prediction["category"],
+                "recommendations": image_data,
+                "face_image": face_url,
+                "jewelry_image": jewelry_url,
+                "timestamp": prediction["timestamp"]
+            })
+
+        logger.info(f"✅ Retrieved {len(results)} predictions for user {user_id}")
+        return results
+    except Exception as e:
+        logger.error(f"❌ Error retrieving predictions from MongoDB: {e}")
+        return {"error": f"Database error: {str(e)}"}
+    
+
+import os
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from tensorflow.keras.models import load_model, Model
+import pickle
+from io import BytesIO
+
+class JewelryRLPredictor:
+    def __init__(self, model_path, scaler_path, pairwise_features_path):
+        for path in [model_path, scaler_path, pairwise_features_path]:
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Missing required file: {path}")
+
+        print("🚀 Loading model...")
+        self.model = load_model(model_path)
+        self.img_size = (224, 224)
+        self.feature_size = 1280
+        self.device = "/GPU:0" if tf.config.list_physical_devices('GPU') else "/CPU:0"
+
+        print("📏 Loading scaler...")
+        with open(scaler_path, 'rb') as f:
+            self.scaler = pickle.load(f)
+
+        print("🔄 Setting up MobileNetV2 feature extractor...")
+        base_model = MobileNetV2(weights="imagenet", include_top=False, input_shape=(224, 224, 3))
+        global_avg_layer = tf.keras.layers.GlobalAveragePooling2D()
+        reduction_layer = tf.keras.layers.Dense(self.feature_size, activation="relu")
+        self.feature_extractor = Model(
+            inputs=base_model.input,
+            outputs=reduction_layer(global_avg_layer(base_model.output))
+        )
+
+        print("📂 Loading pairwise features...")
+        self.pairwise_features = np.load(pairwise_features_path, allow_pickle=True).item()
+        self.pairwise_features = {
+            k: self.scaler.transform(np.array(v).reshape(1, -1))
+            for k, v in self.pairwise_features.items() if v is not None and v.size == self.feature_size
+        }
+        self.jewelry_list = list(self.pairwise_features.values())
+        self.jewelry_names = list(self.pairwise_features.keys())
+        print("✅ Predictor initialized successfully!")
+
+    def extract_features(self, img_data):
+        try:
+            img = image.load_img(BytesIO(img_data), target_size=self.img_size)
+            img_array = image.img_to_array(img)
+            img_array = np.expand_dims(img_array, axis=0)
+            img_array = preprocess_input(img_array)
+            features = self.feature_extractor.predict(img_array, verbose=0)
+            return self.scaler.transform(features)
+        except Exception as e:
+            print(f"❌ Error extracting features: {e}")
+            return None
+
+    def predict_compatibility(self, face_data, jewel_data):
+        face_features = self.extract_features(face_data)
+        jewel_features = self.extract_features(jewel_data)
+        if face_features is None or jewel_features is None:
+            return None, "Feature extraction failed", []
+
+        face_norm = face_features / np.linalg.norm(face_features, axis=1, keepdims=True)
+        jewel_norm = jewel_features / np.linalg.norm(jewel_features, axis=1, keepdims=True)
+        cosine_similarity = np.sum(face_norm * jewel_norm, axis=1)[0]
+        scaled_score = (cosine_similarity + 1) / 2.0
+
+        if scaled_score >= 0.8:
+            category = "Very Good"
+        elif scaled_score >= 0.6:
+            category = "Good"
+        elif scaled_score >= 0.4:
+            category = "Neutral"
+        elif scaled_score >= 0.2:
+            category = "Bad"
+        else:
+            category = "Very Bad"
+
+        print(f"Category: {category}")
+        with tf.device(self.device):
+            q_values = self.model.predict(face_features, verbose=0)[0]
+
+        if len(q_values) != len(self.jewelry_names):
+            print("❌ Error: Q-values length does not match jewelry list.")
+            return scaled_score, category, []
+
+        top_indices = np.argsort(q_values)[::-1]
+        top_recommendations = [(self.jewelry_names[idx], q_values[idx]) for idx in top_indices[:10]]
+        recommendations = [
+            {
+                "name": name,
+                "url": None,  # URL will be filled by database lookup
+                "score": float(q_value),  # Use Q-value as the recommendation score
+                "category": self.compute_category(q_value)  # Compute category based on Q-value
+            }
+            for name, q_value in top_recommendations
+        ]
+        return scaled_score, category, recommendations
+
+    def compute_category(self, score: float) -> str:
+        """Helper function to compute category based on score."""
+        if score >= 0.8:
+            return "Very Good"
+        elif score >= 0.6:
+            return "Good"
+        elif score >= 0.4:
+            return "Neutral"
+        elif score >= 0.2:
+            return "Bad"
+        else:
+            return "Very Bad"
+
+def get_predictor(model_path, scaler_path, pairwise_features_path):
+    try:
+        predictor = JewelryRLPredictor(model_path, scaler_path, pairwise_features_path)
+        return predictor
+    except Exception as e:
+        print(f"🚨 Failed to initialize JewelryRLPredictor: {e}")
+        return None
+
+def predict_compatibility(predictor, face_data, jewelry_data):
+    if predictor is None:
+        return None, "Predictor not initialized", []
+    return predictor.predict_compatibility(face_data, jewelry_data)

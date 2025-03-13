@@ -1,0 +1,1691 @@
+backup_file
+
+---------------- Below codes were working before i started saving images locally so that i can show for which image it has 
+generated the recommandations ---------------------------------------------------
+
+--------------- UploadScreen  code is correct but for the result and the history might not be true ---------------------------
+
+
+// UploadScreen correct 
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+
+class UploadScreen extends StatefulWidget {
+  const UploadScreen({super.key});
+
+  @override
+  _UploadScreenState createState() => _UploadScreenState();
+}
+
+class _UploadScreenState extends State<UploadScreen> {
+  File? _faceImage;
+  File? _jewelryImage;
+  final ImagePicker _picker = ImagePicker();
+  bool _isLoading = false;
+
+  Future<void> _pickImage(String type) async {
+    try {
+      // Show bottom sheet instead of dialog
+      final source = await _showImageSourceBottomSheet();
+
+      if (source == null) return;
+
+      final pickedFile = await _picker.pickImage(
+        source: source,
+        imageQuality: 85,
+      );
+
+      if (pickedFile != null) {
+        final file = File(pickedFile.path);
+        if (await file.exists()) {
+          if (mounted) {
+            setState(() {
+              if (type == 'face') {
+                _faceImage = file;
+              } else {
+                _jewelryImage = file;
+              }
+            });
+          }
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Failed to load image.")),
+          );
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error picking image: $e")));
+    }
+  }
+
+  // Future<ImageSource?> _showImageSourceBottomSheet() async {
+  //   return showModalBottomSheet<ImageSource>(
+  //     context: context,
+  //     shape: const RoundedRectangleBorder(
+  //       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+  //     ),
+  //     builder:
+  //         (context) => Container(
+  //           padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+  //           child: Column(
+  //             mainAxisSize: MainAxisSize.min,
+  //             children: [
+  //               Text(
+  //                 "Select Image Source",
+  //                 style: Theme.of(
+  //                   context,
+  //                 ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+  //               ),
+  //               const SizedBox(height: 20),
+  //               ListTile(
+  //                 leading: const Icon(Icons.photo_library, size: 28),
+  //                 title: const Text("Gallery"),
+  //                 contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+  //                 onTap: () => Navigator.pop(context, ImageSource.gallery),
+  //               ),
+  //               const Divider(),
+  //               ListTile(
+  //                 leading: const Icon(Icons.camera_alt, size: 28),
+  //                 title: const Text("Camera"),
+  //                 contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+  //                 onTap: () => Navigator.pop(context, ImageSource.camera),
+  //               ),
+  //               const SizedBox(height: 10),
+  //             ],
+  //           ),
+  //         ),
+  //   );
+  // }
+
+  Future<ImageSource?> _showImageSourceBottomSheet() async {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder:
+          (context) => Container(
+            padding: const EdgeInsets.symmetric(
+              vertical: 25,
+              horizontal: 16,
+            ), // Increased vertical padding
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Text(
+                //   "Select Image Source",
+                //   style: Theme.of(
+                //     context,
+                //   ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                // ),
+                const SizedBox(height: 15), // Increased space after title
+                ListTile(
+                  leading: const Icon(Icons.photo_library, size: 28),
+                  title: const Text("Gallery"),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+                const Divider(),
+                const SizedBox(
+                  height: 15,
+                ), // Increased space between Gallery and Camera
+                ListTile(
+                  leading: const Icon(Icons.camera_alt, size: 28),
+                  title: const Text("Camera"),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+                const SizedBox(height: 15), // Increased space at the bottom
+              ],
+            ),
+          ),
+    );
+  }
+
+  Future<void> _uploadImages() async {
+    if (_isLoading) return;
+
+    if (_faceImage == null || _jewelryImage == null) {
+      print(
+        'Missing images: faceImage=$_faceImage, jewelryImage=$_jewelryImage',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please upload both images')),
+      );
+      return;
+    }
+
+    print(
+      'Starting upload with faceImage=$_faceImage, jewelryImage=$_jewelryImage',
+    );
+    setState(() => _isLoading = true);
+
+    if (mounted) {
+      print('Navigating to /processing');
+      Navigator.pushNamed(
+        context,
+        '/processing',
+        arguments: {'face': _faceImage, 'jewelry': _jewelryImage},
+      ).then((_) {
+        if (mounted) {
+          print('Returned from processing');
+          setState(() => _isLoading = false);
+        }
+      });
+    }
+  }
+
+  Widget _buildImageCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required File? image,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            children: [
+              image == null
+                  ? Container(
+                    width: double.infinity,
+                    height: 180,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 70,
+                      color: theme.colorScheme.primary.withOpacity(0.7),
+                    ),
+                  )
+                  : ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.file(
+                      image,
+                      width: double.infinity,
+                      height: 180,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                style: theme.textTheme.bodyMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: onTap,
+                icon: Icon(
+                  image == null ? Icons.add_photo_alternate : Icons.edit,
+                ),
+                label: Text(image == null ? "Select Image" : "Change Image"),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  side: BorderSide(color: theme.colorScheme.primary),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bool canSubmit = _faceImage != null && _jewelryImage != null;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          "Upload Images",
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        elevation: 0,
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors:
+                theme.brightness == Brightness.dark
+                    ? [theme.colorScheme.surface, theme.colorScheme.surface]
+                    : [theme.colorScheme.surface, theme.colorScheme.surface],
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        _buildImageCard(
+                          title: "Your Face Photo",
+                          subtitle: "Upload a clear image of your face",
+                          icon: Icons.face,
+                          image: _faceImage,
+                          onTap: () => _pickImage('face'),
+                        ),
+                        _buildImageCard(
+                          title: "Jewelry Photo",
+                          subtitle: "Upload the jewelry you want to try",
+                          icon: Icons.diamond,
+                          image: _jewelryImage,
+                          onTap: () => _pickImage('jewelry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: canSubmit && !_isLoading ? _uploadImages : null,
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 6,
+                  ),
+                  child:
+                      _isLoading
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : const Text(
+                            "Match Jewelry",
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+// ResultScreen
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:io';
+import '../providers/auth_provider.dart';
+import '../screens/image_storage.dart';
+
+class ResultsScreen extends StatefulWidget {
+  final Map<String, dynamic>? initialResult;
+
+  const ResultsScreen({super.key, this.initialResult});
+
+  @override
+  _ResultsScreenState createState() => _ResultsScreenState();
+}
+
+class _ResultsScreenState extends State<ResultsScreen> {
+  Map<String, dynamic>? _prediction;
+  bool _isLoading = true;
+  String _errorMessage = "";
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _fetchResult();
+  }
+
+  Future<void> _fetchResult() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = "";
+    });
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final token = authProvider.token;
+
+    if (token == null) {
+      setState(() {
+        _errorMessage = "Unauthorized: Please log in.";
+        _isLoading = false;
+      });
+      Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
+
+    final routeArgs =
+        ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    final predictionData = widget.initialResult ?? routeArgs;
+    final predictionId = predictionData?['prediction_id'] as String?;
+
+    if (predictionId == null &&
+        predictionData != null &&
+        predictionData.containsKey('score')) {
+      if (mounted) {
+        setState(() {
+          _prediction = Map<String, dynamic>.from(predictionData);
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
+    if (predictionId == null) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = "No prediction data provided";
+        });
+      }
+      return;
+    }
+
+    try {
+      final apiUrl =
+          'https://jewelifyserver.onrender.com/predictions/get_prediction/$predictionId';
+      final response = await http
+          .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'})
+          .timeout(const Duration(seconds: 240));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (mounted) {
+          setState(() {
+            _prediction = data;
+            _isLoading = false;
+          });
+        }
+      } else if (response.statusCode == 401) {
+        setState(() {
+          _errorMessage = "Session expired. Please log in again.";
+          _isLoading = false;
+        });
+        authProvider.logout();
+        Navigator.pushReplacementNamed(context, '/login');
+      } else {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage =
+                "Failed to fetch result: ${response.statusCode} - ${response.body}";
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = "Error fetching result: $e";
+        });
+      }
+    }
+  }
+
+  String addEmojiToCategory(String category) {
+    switch (category.trim().toLowerCase()) {
+      case 'very good':
+        return '🌟 Very Good';
+      case 'good':
+        return '✅ Good';
+      case 'neutral':
+        return '😐 Neutral';
+      case 'bad':
+        return '⚠️ Bad';
+      case 'very bad':
+        return '❌ Very Bad';
+      default:
+        return category;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          "Your Result",
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        elevation: 0,
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors:
+                theme.brightness == Brightness.dark
+                    ? [theme.colorScheme.surface, theme.colorScheme.surface]
+                    : [theme.colorScheme.surface, theme.colorScheme.surface],
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child:
+                _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _errorMessage.isNotEmpty
+                    ? _buildErrorWidget(theme)
+                    : _buildResultWidget(theme),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResultWidget(ThemeData theme) {
+    if (_prediction == null) {
+      return const Center(child: Text("No prediction data available"));
+    }
+
+    final score = _prediction!['score'] as num? ?? 0.0;
+    final category = addEmojiToCategory(
+      _prediction!['category']?.toString() ?? 'Not Assigned',
+    );
+    final recommendations =
+        (_prediction!['recommendations'] as List<dynamic>?)
+            ?.map(
+              (rec) =>
+                  JewelryRecommendations.fromJson(rec as Map<String, dynamic>),
+            )
+            .toList() ??
+        [];
+    final userId = _prediction!['user_id']?.toString();
+    final faceImagePath = _prediction!['face_image_path']?.toString();
+    final jewelryImagePath = _prediction!['jewelry_image_path']?.toString();
+
+    // Fetch local images
+    Future<File?> faceImageFuture =
+        faceImagePath != null
+            ? ImageStorage.getImage(faceImagePath)
+            : Future.value(null);
+    Future<File?> jewelryImageFuture =
+        jewelryImagePath != null
+            ? ImageStorage.getImage(jewelryImagePath)
+            : Future.value(null);
+
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            child: Card(
+              elevation: 6,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.check_circle,
+                      size: 80,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      "Your Jewelry Match Result",
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (faceImagePath != null ||
+                              jewelryImagePath != null) ...[
+                            Text(
+                              "Uploaded Images:",
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                if (faceImagePath != null)
+                                  FutureBuilder<File?>(
+                                    future: faceImageFuture,
+                                    builder: (context, snapshot) {
+                                      if (snapshot.connectionState ==
+                                          ConnectionState.waiting) {
+                                        return const CircularProgressIndicator();
+                                      }
+                                      if (snapshot.hasData &&
+                                          snapshot.data != null) {
+                                        return ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          child: Image.file(
+                                            snapshot.data!,
+                                            width: 100,
+                                            height: 100,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        );
+                                      }
+                                      return Container(
+                                        width: 100,
+                                        height: 100,
+                                        color: Colors.grey[300],
+                                        child: const Icon(Icons.error),
+                                      );
+                                    },
+                                  ),
+                                if (jewelryImagePath != null)
+                                  FutureBuilder<File?>(
+                                    future: jewelryImageFuture,
+                                    builder: (context, snapshot) {
+                                      if (snapshot.connectionState ==
+                                          ConnectionState.waiting) {
+                                        return const CircularProgressIndicator();
+                                      }
+                                      if (snapshot.hasData &&
+                                          snapshot.data != null) {
+                                        return ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          child: Image.file(
+                                            snapshot.data!,
+                                            width: 100,
+                                            height: 100,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        );
+                                      }
+                                      return Container(
+                                        width: 100,
+                                        height: 100,
+                                        color: Colors.grey[300],
+                                        child: const Icon(Icons.error),
+                                      );
+                                    },
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                          ],
+                          Text(
+                            "Score: ${score.toStringAsFixed(2)}",
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            "Category: $category",
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              fontFamily: 'NotoColorEmoji',
+                            ),
+                          ),
+                          if (userId != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              "User ID: $userId",
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 20),
+                          Text(
+                            "Recommendations:",
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          if (recommendations.isNotEmpty)
+                            ...recommendations.map(
+                              (rec) => Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8.0,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      rec.name,
+                                      style: theme.textTheme.bodyLarge
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    if (rec.imageUrl != null &&
+                                        rec.imageUrl!.isNotEmpty) ...[
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: CachedNetworkImage(
+                                          imageUrl: rec.imageUrl!,
+                                          width: double.infinity,
+                                          height: 150,
+                                          fit: BoxFit.cover,
+                                          placeholder:
+                                              (context, url) => const Center(
+                                                child:
+                                                    CircularProgressIndicator(),
+                                              ),
+                                          errorWidget:
+                                              (context, url, error) =>
+                                                  Container(
+                                                    width: double.infinity,
+                                                    height: 150,
+                                                    color: Colors.grey[300],
+                                                    child: const Icon(
+                                                      Icons.error,
+                                                    ),
+                                                  ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                    ],
+                                    Text(
+                                      "Compatibility Score: ${(rec.score * 100).toStringAsFixed(1)}%",
+                                      style: theme.textTheme.bodyLarge,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      "Category: ${addEmojiToCategory(rec.category)}",
+                                      style: theme.textTheme.bodyLarge
+                                          ?.copyWith(
+                                            fontFamily: 'NotoColorEmoji',
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            Text(
+                              "No recommendations available",
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: Colors.grey,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed:
+                    () => Navigator.pushReplacementNamed(context, '/upload'),
+                icon: const Icon(Icons.refresh),
+                label: const Text("Try Again"),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  side: BorderSide(color: theme.colorScheme.primary),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed:
+                    () => Navigator.popUntil(context, (route) => route.isFirst),
+                icon: const Icon(Icons.home),
+                label: const Text("Home"),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildErrorWidget(ThemeData theme) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.error_outline, size: 80, color: theme.colorScheme.error),
+        const SizedBox(height: 24),
+        Text(
+          "Error Fetching Result",
+          style: theme.textTheme.headlineMedium,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          _errorMessage,
+          style: theme.textTheme.bodyLarge,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton(
+          onPressed: _fetchResult,
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: const Text("Retry"),
+        ),
+      ],
+    );
+  }
+}
+
+class JewelryRecommendations {
+  final String name;
+  final String? imageUrl;
+  final double score;
+  final String category;
+
+  JewelryRecommendations({
+    required this.name,
+    this.imageUrl,
+    required this.score,
+    required this.category,
+  });
+
+  factory JewelryRecommendations.fromJson(Map<String, dynamic> json) {
+    print('Recommendation JSON: $json');
+    return JewelryRecommendations(
+      name: json['name']?.toString() ?? 'Unknown Item',
+      imageUrl: json['url']?.toString(),
+      score: (json['score'] is num ? json['score'].toDouble() : 0.0),
+      category: json['category']?.toString() ?? 'Not Assigned',
+    );
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// HistoryScreen
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:io';
+import '../providers/auth_provider.dart';
+import '../screens/image_storage.dart';
+import 'app_theme.dart';
+
+class JewelryRecommendations {
+  final String name;
+  final String? imageUrl;
+  final double score;
+  final String category;
+
+  JewelryRecommendations({
+    required this.name,
+    this.imageUrl,
+    required this.score,
+    required this.category,
+  });
+
+  factory JewelryRecommendations.fromJson(Map<String, dynamic> json) {
+    print('Recommendation JSON: $json');
+    return JewelryRecommendations(
+      name: json['name']?.toString() ?? 'Unknown Item',
+      imageUrl: json['url']?.toString(),
+      score: (json['score'] is num ? json['score'].toDouble() : 0.0),
+      category: json['category']?.toString() ?? 'Not Assigned',
+    );
+  }
+}
+
+class HistoryItem {
+  final String id;
+  final String? userId;
+  final String date;
+  final String category;
+  final double score;
+  final List<JewelryRecommendations> recommendations;
+  final String? faceImagePath;
+  final String? jewelryImagePath;
+  bool isExpanded;
+
+  HistoryItem({
+    required this.id,
+    this.userId,
+    required this.date,
+    required this.category,
+    required this.score,
+    required this.recommendations,
+    this.faceImagePath,
+    this.jewelryImagePath,
+    this.isExpanded = false,
+  });
+
+  factory HistoryItem.fromJson(Map<String, dynamic> json) {
+    return HistoryItem(
+      id: json['id']?.toString() ?? '',
+      userId: json['user_id']?.toString(),
+      date: json['timestamp']?.toString() ?? 'Unknown Date',
+      category: json['category']?.toString() ?? 'Not Assigned',
+      score: (json['score'] is num ? json['score'].toDouble() : 0.0),
+      recommendations:
+          (json['recommendations'] as List<dynamic>?)
+              ?.map(
+                (rec) => JewelryRecommendations.fromJson(
+                  rec as Map<String, dynamic>,
+                ),
+              )
+              .toList() ??
+          [],
+      faceImagePath: json['face_image_path']?.toString(),
+      jewelryImagePath: json['jewelry_image_path']?.toString(),
+      isExpanded: false,
+    );
+  }
+}
+
+class HistoryScreen extends StatefulWidget {
+  const HistoryScreen({super.key});
+
+  @override
+  _HistoryScreenState createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  List<HistoryItem> _history = [];
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchHistory();
+  }
+
+  Future<void> _fetchHistory() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final token = authProvider.token;
+
+    if (token == null) {
+      setState(() {
+        _errorMessage = "Unauthorized: Please log in.";
+        _isLoading = false;
+      });
+      Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
+
+    try {
+      final response = await http
+          .get(
+            Uri.parse('https://jewelifyserver.onrender.com/history/'),
+            headers: {'Authorization': 'Bearer $token'},
+          )
+          .timeout(const Duration(seconds: 240));
+
+      print('History API Response: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final dynamic data = json.decode(response.body);
+        if (data is List) {
+          setState(() {
+            _history =
+                data
+                    .map(
+                      (item) =>
+                          HistoryItem.fromJson(item as Map<String, dynamic>),
+                    )
+                    .toList();
+            _isLoading = false;
+          });
+        } else if (data is Map && data.containsKey('message')) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      } else if (response.statusCode == 401) {
+        setState(() {
+          _errorMessage = "Session expired. Please log in again.";
+          _isLoading = false;
+        });
+        authProvider.logout();
+        Navigator.pushReplacementNamed(context, '/login');
+      } else {
+        setState(() {
+          _errorMessage =
+              "Failed to fetch history: ${response.statusCode} - ${response.body}";
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = "Error fetching history: $e";
+        _isLoading = false;
+      });
+    }
+  }
+
+  void toggleExpand(int index) {
+    setState(() {
+      _history[index].isExpanded = !_history[index].isExpanded;
+    });
+  }
+
+  String addEmojiToCategory(String category) {
+    switch (category.trim().toLowerCase()) {
+      case 'very good':
+        return '🌟 Very Good';
+      case 'good':
+        return '✅ Good';
+      case 'neutral':
+        return '😐 Neutral';
+      case 'bad':
+        return '⚠️ Bad';
+      case 'very bad':
+        return '❌ Very Bad';
+      default:
+        return category;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
+      appBar: AppBar(
+        backgroundColor: AppTheme.primaryColor,
+        foregroundColor: Colors.white,
+        title: const Text('History'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Your Prediction History', style: AppTheme.titleStyle),
+              const SizedBox(height: 16),
+              Expanded(
+                child:
+                    _isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : _errorMessage != null
+                        ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                _errorMessage!,
+                                style: const TextStyle(color: Colors.red),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 20),
+                              ElevatedButton(
+                                onPressed: _fetchHistory,
+                                style: AppTheme.primaryButtonStyle,
+                                child: const Text('Retry'),
+                              ),
+                            ],
+                          ),
+                        )
+                        : _history.isEmpty
+                        ? const Center(child: Text('No history exists'))
+                        : ListView.builder(
+                          itemCount: _history.length,
+                          itemBuilder: (context, index) {
+                            final item = _history[index];
+                            Future<File?> faceImageFuture =
+                                item.faceImagePath != null
+                                    ? ImageStorage.getImage(item.faceImagePath!)
+                                    : Future.value(null);
+                            Future<File?> jewelryImageFuture =
+                                item.jewelryImagePath != null
+                                    ? ImageStorage.getImage(
+                                      item.jewelryImagePath!,
+                                    )
+                                    : Future.value(null);
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 8.0),
+                              decoration: AppTheme.cardDecoration,
+                              child: Column(
+                                children: [
+                                  InkWell(
+                                    onTap: () => toggleExpand(index),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16.0),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  item.date,
+                                                  style:
+                                                      AppTheme.itemTitleStyle,
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  addEmojiToCategory(
+                                                    item.category,
+                                                  ),
+                                                  style: AppTheme.scoreStyle
+                                                      .copyWith(
+                                                        fontFamily:
+                                                            'NotoColorEmoji',
+                                                      ),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  'Score: ${(item.score * 100).toStringAsFixed(1)}%',
+                                                  style: AppTheme.scoreStyle,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Icon(
+                                            item.isExpanded
+                                                ? Icons.keyboard_arrow_up
+                                                : Icons.keyboard_arrow_down,
+                                            color: AppTheme.primaryColor,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  if (item.isExpanded)
+                                    Column(
+                                      children: [
+                                        if (item.faceImagePath != null ||
+                                            item.jewelryImagePath != null)
+                                          Padding(
+                                            padding: const EdgeInsets.all(16.0),
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.spaceEvenly,
+                                              children: [
+                                                if (item.faceImagePath != null)
+                                                  FutureBuilder<File?>(
+                                                    future: faceImageFuture,
+                                                    builder: (
+                                                      context,
+                                                      snapshot,
+                                                    ) {
+                                                      if (snapshot
+                                                              .connectionState ==
+                                                          ConnectionState
+                                                              .waiting) {
+                                                        return const CircularProgressIndicator();
+                                                      }
+                                                      if (snapshot.hasData &&
+                                                          snapshot.data !=
+                                                              null) {
+                                                        return ClipRRect(
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                12,
+                                                              ),
+                                                          child: Image.file(
+                                                            snapshot.data!,
+                                                            width: 80,
+                                                            height: 80,
+                                                            fit: BoxFit.cover,
+                                                          ),
+                                                        );
+                                                      }
+                                                      return Container(
+                                                        width: 80,
+                                                        height: 80,
+                                                        color: Colors.grey[300],
+                                                        child: const Icon(
+                                                          Icons.error,
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                if (item.jewelryImagePath !=
+                                                    null)
+                                                  FutureBuilder<File?>(
+                                                    future: jewelryImageFuture,
+                                                    builder: (
+                                                      context,
+                                                      snapshot,
+                                                    ) {
+                                                      if (snapshot
+                                                              .connectionState ==
+                                                          ConnectionState
+                                                              .waiting) {
+                                                        return const CircularProgressIndicator();
+                                                      }
+                                                      if (snapshot.hasData &&
+                                                          snapshot.data !=
+                                                              null) {
+                                                        return ClipRRect(
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                12,
+                                                              ),
+                                                          child: Image.file(
+                                                            snapshot.data!,
+                                                            width: 80,
+                                                            height: 80,
+                                                            fit: BoxFit.cover,
+                                                          ),
+                                                        );
+                                                      }
+                                                      return Container(
+                                                        width: 80,
+                                                        height: 80,
+                                                        color: Colors.grey[300],
+                                                        child: const Icon(
+                                                          Icons.error,
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ListView.separated(
+                                          shrinkWrap: true,
+                                          physics:
+                                              const NeverScrollableScrollPhysics(),
+                                          itemCount:
+                                              item.recommendations.length,
+                                          separatorBuilder:
+                                              (context, index) => const Divider(
+                                                height: 1,
+                                                thickness: 1,
+                                                color: AppTheme.dividerColor,
+                                              ),
+                                          itemBuilder: (context, recIndex) {
+                                            final recommendation =
+                                                item.recommendations[recIndex];
+                                            return Padding(
+                                              padding: const EdgeInsets.all(
+                                                16.0,
+                                              ),
+                                              child: Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  ClipRRect(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
+                                                        ),
+                                                    child:
+                                                        recommendation.imageUrl !=
+                                                                    null &&
+                                                                recommendation
+                                                                    .imageUrl!
+                                                                    .isNotEmpty
+                                                            ? CachedNetworkImage(
+                                                              imageUrl:
+                                                                  recommendation
+                                                                      .imageUrl!,
+                                                              width: 80,
+                                                              height: 80,
+                                                              fit: BoxFit.cover,
+                                                              placeholder:
+                                                                  (
+                                                                    context,
+                                                                    url,
+                                                                  ) => const Center(
+                                                                    child:
+                                                                        CircularProgressIndicator(),
+                                                                  ),
+                                                              errorWidget: (
+                                                                context,
+                                                                url,
+                                                                error,
+                                                              ) {
+                                                                print(
+                                                                  'Image Load Error: $error for URL: $url',
+                                                                );
+                                                                return Container(
+                                                                  width: 80,
+                                                                  height: 80,
+                                                                  color:
+                                                                      Colors
+                                                                          .grey[300],
+                                                                  child: const Icon(
+                                                                    Icons.error,
+                                                                  ),
+                                                                );
+                                                              },
+                                                            )
+                                                            : Container(
+                                                              width: 80,
+                                                              height: 80,
+                                                              color:
+                                                                  Colors
+                                                                      .grey[300],
+                                                              child: const Icon(
+                                                                Icons
+                                                                    .image_not_supported,
+                                                              ),
+                                                            ),
+                                                  ),
+                                                  const SizedBox(width: 16),
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          recommendation.name,
+                                                          style:
+                                                              AppTheme
+                                                                  .itemTitleStyle,
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 4,
+                                                        ),
+                                                        Text(
+                                                          "Compatibility Score: ${(recommendation.score * 100).toStringAsFixed(1)}%",
+                                                          style:
+                                                              AppTheme
+                                                                  .scoreStyle,
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 4,
+                                                        ),
+                                                        Text(
+                                                          "Category: ${addEmojiToCategory(recommendation.category)}",
+                                                          style: AppTheme
+                                                              .scoreStyle
+                                                              .copyWith(
+                                                                fontFamily:
+                                                                    'NotoColorEmoji',
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+// Processing Screen 
+
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' as http_parser;
+import 'dart:io';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
+
+class ProcessingScreen extends StatefulWidget {
+  final Map<String, dynamic>? arguments;
+
+  const ProcessingScreen({super.key, this.arguments});
+
+  @override
+  _ProcessingScreenState createState() => _ProcessingScreenState();
+}
+
+class _ProcessingScreenState extends State<ProcessingScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  bool _isError = false;
+  String _errorMessage = "";
+  bool _isCancelled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+    _processImages();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _processImages() async {
+    if (_isCancelled || widget.arguments == null) {
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+
+    final faceFile = widget.arguments!['face'] as File;
+    final jewelryFile = widget.arguments!['jewelry'] as File;
+    final token = Provider.of<AuthProvider>(context, listen: false).token;
+
+    // Updated URL to point to the deployed FastAPI endpoint
+    const apiUrl = 'https://jewelify-server.onrender.com/predictions/predict';
+    var request = http.MultipartRequest('POST', Uri.parse(apiUrl));
+
+    try {
+      // Add authentication header
+      request.headers['Authorization'] = 'Bearer $token';
+
+      // Determine MIME type based on file extension
+      String getMimeType(String path) {
+        final ext = path.split('.').last.toLowerCase();
+        return ext == 'png' ? 'image/png' : 'image/jpeg'; // Default to JPEG
+      }
+
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'face',
+          faceFile.path,
+          contentType: http_parser.MediaType.parse(getMimeType(faceFile.path)),
+        ),
+      );
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'jewelry',
+          jewelryFile.path,
+          contentType: http_parser.MediaType.parse(
+            getMimeType(jewelryFile.path),
+          ),
+        ),
+      );
+
+      final response = await request.send().timeout(
+        const Duration(seconds: 120),
+      );
+      final responseBody = await response.stream.bytesToString();
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(responseBody);
+        if (mounted && !_isCancelled) {
+          Navigator.pushReplacementNamed(
+            context,
+            '/results',
+            arguments: result,
+          );
+        }
+      } else {
+        setState(() {
+          _isError = true;
+          _errorMessage =
+              "Server error: ${response.statusCode} - $responseBody";
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isError = true;
+          _errorMessage = "Failed to process: $e";
+        });
+      }
+    }
+  }
+
+  void _cancelProcessing() {
+    setState(() {
+      _isCancelled = true;
+      _animationController.stop();
+    });
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return WillPopScope(
+      onWillPop: () async {
+        _cancelProcessing();
+        return false;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text(
+            "Processing",
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors:
+                  theme.brightness == Brightness.dark
+                      ? [
+                        theme.colorScheme.surface,
+                        theme.colorScheme.surface,
+                      ]
+                      : [
+                        theme.colorScheme.surface,
+                        theme.colorScheme.surface,
+                      ],
+            ),
+          ),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32.0),
+              child:
+                  _isError
+                      ? _buildErrorWidget(theme)
+                      : _buildLoadingWidget(theme),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingWidget(ThemeData theme) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        RotationTransition(
+          turns: _animationController,
+          child: Icon(
+            Icons.diamond,
+            size: 100,
+            color: theme.colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: 48),
+        Text(
+          "Analyzing Your Style...",
+          style: theme.textTheme.headlineMedium,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          "Please wait while we process your images...",
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.colorScheme.onSurface.withOpacity(0.7),
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 32),
+        OutlinedButton.icon(
+          onPressed: _cancelProcessing,
+          icon: const Icon(Icons.cancel),
+          label: const Text("Cancel"),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            side: BorderSide(color: theme.colorScheme.error),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildErrorWidget(ThemeData theme) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.error_outline, size: 100, color: theme.colorScheme.error),
+        const SizedBox(height: 48),
+        Text(
+          "Processing Error",
+          style: theme.textTheme.headlineMedium,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          _errorMessage,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.colorScheme.onSurface.withOpacity(0.7),
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 32),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _isError = false;
+                  _animationController.repeat();
+                });
+                _processImages();
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text("Retry"),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            OutlinedButton.icon(
+              onPressed: _cancelProcessing,
+              icon: const Icon(Icons.arrow_back),
+              label: const Text("Go Back"),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
