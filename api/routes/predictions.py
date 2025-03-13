@@ -10,11 +10,14 @@ load_dotenv()
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 predictor = get_predictor(
-    os.getenv("XGBOOST_MODEL_PATH", "models/xgboost_jewelry_v1.model"),
-    os.getenv("FNN_MODEL_PATH", "models/FNN_improved_v5.keras"),
-    os.getenv("XGBOOST_SCALER_PATH", "models/scaler_xgboost_v1.pkl"),
-    os.getenv("FNN_SCALER_PATH", "models/FNN_improved_v5_scaler.pkl"),
-    os.getenv("PAIRWISE_FEATURES_PATH", "models/pairwise_features.npy")
+    os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model"),
+    os.getenv("FNN_MODEL_PATH", "FNN_improved_v5.keras"),
+    os.getenv("XGBOOST_SCALER_PATH", "scaler_xgboost_v1.pkl"),
+    os.getenv("FNN_SCALER_PATH", "FNN_improved_v5_scaler.pkl"),
+    os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy"),
+    os.getenv("FACE_FEATURES_PATH", "face_features.npy"),
+    os.getenv("EARRING_FEATURES_PATH", "earrings_features.npy"),
+    os.getenv("NECKLACE_FEATURES_PATH", "necklace_features.npy")
 )
 
 @router.post("/predict")
@@ -28,11 +31,14 @@ async def predict(
     global predictor
     if predictor is None:
         predictor = get_predictor(
-            os.getenv("XGBOOST_MODEL_PATH", "models/xgboost_jewelry_v1.model"),
-            os.getenv("FNN_MODEL_PATH", "models/FNN_improved_v5.keras"),
-            os.getenv("XGBOOST_SCALER_PATH", "models/scaler_xgboost_v1.pkl"),
-            os.getenv("FNN_SCALER_PATH", "models/FNN_improved_v5_scaler.pkl"),
-            os.getenv("PAIRWISE_FEATURES_PATH", "models/pairwise_features.npy")
+            os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model"),
+            os.getenv("FNN_MODEL_PATH", "FNN_improved_v5.keras"),
+            os.getenv("XGBOOST_SCALER_PATH", "scaler_xgboost_v1.pkl"),
+            os.getenv("FNN_SCALER_PATH", "FNN_improved_v5_scaler.pkl"),
+            os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy"),
+            os.getenv("FACE_FEATURES_PATH", "face_features.npy"),
+            os.getenv("EARRING_FEATURES_PATH", "earrings_features.npy"),
+            os.getenv("NECKLACE_FEATURES_PATH", "necklace_features.npy")
         )
         if predictor is None:
             raise HTTPException(status_code=500, detail="Model is not loaded properly")
@@ -48,6 +54,11 @@ async def predict(
 
     try:
         xgboost_score, xgboost_category, xgboost_recommendations, fnn_score, fnn_category, fnn_recommendations = predict_both(predictor, face_data, jewelry_data)
+        if xgboost_category in ["Invalid face image", "Invalid jewelry image"] or fnn_category in ["Invalid face image", "Invalid jewelry image"]:
+            if "face" in xgboost_category or "face" in fnn_category:
+                raise HTTPException(status_code=400, detail="Uploaded face image is invalid")
+            if "jewelry" in xgboost_category or "jewelry" in fnn_category:
+                raise HTTPException(status_code=400, detail="Uploaded jewelry image is invalid")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
