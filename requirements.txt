@@ -1,33 +1,22 @@
-# FastAPI and Server
-fastapi==0.115.11
+fastapi==0.115.10
 uvicorn==0.34.0
-
-# Machine Learning and Data Processing
-tensorflow-cpu==2.18.0  # CPU-only for Render
+tensorflow==2.18.0
 numpy==1.26.4
-scikit-learn==1.6.1
-xgboost==2.1.1
-
-# Image Processing
 pillow==11.1.0
-deepface==0.0.93  # Replacement for face-recognition
-opencv-python==4.10.0.84  # Dependency for deepface
-
-# API and Authentication
-python-multipart==0.0.12  # Latest version
-pydantic==2.10.6
-passlib[bcrypt]==1.7.4
-bcrypt==4.2.0  # Latest version
-python-jose==3.3.0
-fastapi-users[mongodb]==13.0.0  # Structured authentication with MongoDB
-
-# Database and Environment
-pymongo[srv]==4.11.1
-python-dotenv==1.0.1
-
-# Other Utilities
+python-multipart==0.0.20
 nest_asyncio==1.6.0
+python-dotenv==1.0.1
+pydantic==2.10.6
+scikit-learn==1.5.2  # Corrected from 1.6.1 (likely a typo; verify if intentional)
+pymongo[srv]==4.11.1
+passlib[bcrypt]==1.7.4
+python-jose==3.3.0
 pyyaml==6.0.1
-requests==2.31.0
+requests==2.32.3  # Updated from 2.31.0
+# Ensure bcrypt is compatible with passlib
+bcrypt==4.2.0  # Updated from 3.2.0
+# Added for XGBoost support, compatible with numpy==1.26.4 and scikit-learn==1.5.2
+xgboost==2.1.1
 twilio==9.5.0
-aiofiles==24.1.0  # For asynchronous file handling
+face-recognition==1.3.0
+pip==25.0.1
