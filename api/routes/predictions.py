@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 import os
 from .auth import get_current_user
-from .predictor import JewelryPredictor
+from services.predictor import JewelryPredictor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
