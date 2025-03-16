@@ -1,25 +1,25 @@
-# FastAPI and server
-fastapi==0.115.11 
+# FastAPI and Server
+fastapi==0.115.11
 uvicorn==0.34.0
 
 # Machine Learning and Data Processing
-tensorflow-cpu==2.18.0  # Using tensorflow-cpu for Render
+tensorflow-cpu==2.18.0  # CPU-only for Render
 numpy==1.26.4
 scikit-learn==1.6.1
 xgboost==2.1.1
 
 # Image Processing
 pillow==11.1.0
-deepface==0.0.93  # Replaced face-recognition
+deepface==0.0.93  # Replacement for face-recognition
 opencv-python==4.10.0.84  # Dependency for deepface
 
 # API and Authentication
-python-multipart==0.0.12  # Corrected to the latest version
+python-multipart==0.0.12  # Latest version
 pydantic==2.10.6
 passlib[bcrypt]==1.7.4
-bcrypt==4.2.0  # Updated to the latest version
+bcrypt==4.2.0  # Latest version
 python-jose==3.3.0
-fastapi-users[mongodb]==13.0.0  # For structured authentication
+fastapi-users[mongodb]==13.0.0  # Structured authentication with MongoDB
 
 # Database and Environment
 pymongo[srv]==4.11.1
