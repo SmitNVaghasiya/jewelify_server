@@ -10,6 +10,7 @@ from tensorflow.keras.layers import GlobalAveragePooling2D
 import pickle
 from io import BytesIO
 from PIL import Image
+import cv2  # Added OpenCV import
 
 class JewelryPredictor:
     def __init__(self, xgboost_model_path, mlp_model_path, xgboost_scaler_path, mlp_scaler_path, pairwise_features_path):
@@ -65,8 +66,13 @@ class JewelryPredictor:
         self.jewelry_names = list(self.pairwise_features.keys())
         print(f"Loaded {len(self.jewelry_names)} pairwise features successfully!")
 
+        # Initialize OpenCV face cascade classifier
+        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        if self.face_cascade.empty():
+            raise ValueError("Error loading Haar cascade classifier")
+
     def validate_image(self, img_data, is_face=False):
-        """Validate if the image is suitable (not blank, correct dimensions, etc.). Optionally check for faces."""
+        """Validate if the image is suitable (not blank, correct dimensions, etc.). Use OpenCV for face detection."""
         try:
             # Load image with PIL to check dimensions and format
             img = Image.open(BytesIO(img_data))
@@ -88,11 +94,13 @@ class JewelryPredictor:
                 print("Image appears to be too uniform (possibly blank)")
                 return False
 
-            # If validating a face image, use face_recognition
+            # If validating a face image, use OpenCV Haar cascade
             if is_face:
-                import face_recognition
-                faces = face_recognition.face_locations(img_array)
-                if not faces:
+                # Convert PIL image to OpenCV format (BGR)
+                cv_img = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+                faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+                if len(faces) == 0:
                     print("No faces detected in the image")
                     return False
 
