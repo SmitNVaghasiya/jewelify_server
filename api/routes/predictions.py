@@ -4,18 +4,12 @@ from services.database import save_prediction, get_prediction_by_id, save_review
 from api.dependencies import get_current_user
 import os
 from dotenv import load_dotenv
+import time
 
 # Load environment variables
 load_dotenv()
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
-predictor = get_predictor(
-    os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model"),
-    os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras"),
-    os.getenv("XGBOOST_SCALER_PATH", "scaler_xgboost_v1.pkl"),
-    os.getenv("MLP_SCALER_PATH", "scaler_mlp_v1.pkl"),
-    os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy"),
-)
 
 @router.post("/predict")
 async def predict(
@@ -25,17 +19,25 @@ async def predict(
     jewelry_image_path: str = Form(...),
     current_user: dict = Depends(get_current_user)
 ):
-    global predictor
-    if predictor is None:
-        predictor = get_predictor(
-            os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model"),
-            os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras"),
-            os.getenv("XGBOOST_SCALER_PATH", "scaler_xgboost_v1.pkl"),
-            os.getenv("MLP_SCALER_PATH", "scaler_mlp_v1.pkl"),
-            os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy"),
-        )
-        if predictor is None:
-            raise HTTPException(status_code=500, detail="Model is not loaded properly")
+    max_retries = 3
+    retry_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            predictor = get_predictor(
+                os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model"),
+                os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras"),
+                os.getenv("XGBOOST_SCALER_PATH", "scaler_xgboost_v1.pkl"),
+                os.getenv("MLP_SCALER_PATH", "scaler_mlp_v1.pkl"),
+                os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy"),
+            )
+            if predictor is None:
+                raise ValueError("Model is not loaded properly")
+            break
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise HTTPException(status_code=500, detail=f"Failed to load model after {max_retries} attempts: {str(e)}")
+            time.sleep(retry_delay)
 
     if not face.content_type.startswith('image/') or not jewelry.content_type.startswith('image/'):
         raise HTTPException(status_code=400, detail="Uploaded files must be images")
@@ -118,11 +120,6 @@ async def get_prediction(
         raise HTTPException(status_code=status_code, detail=result["error"])
 
     result["user_id"] = str(current_user["_id"])
-    # Check if overall feedback is missing and add requirement notice
-    if result["prediction1"]["overall_feedback"] == "Not Provided":
-        result["prediction1"]["feedback_required"] = "Overall feedback for prediction1 is required"
-    if result["prediction2"]["overall_feedback"] == "Not Provided":
-        result["prediction2"]["feedback_required"] = "Overall feedback for prediction2 is required"
     return result
 
 @router.post("/feedback/recommendation")

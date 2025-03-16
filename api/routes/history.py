@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from api.dependencies import get_current_user
 from services.database import get_db_client
 from bson import ObjectId
@@ -6,7 +6,11 @@ from bson import ObjectId
 router = APIRouter(prefix="/history", tags=["history"])
 
 @router.get("/")
-async def get_user_history(current_user: dict = Depends(get_current_user)):
+async def get_user_history(
+    current_user: dict = Depends(get_current_user),
+    limit: int = Query(10, ge=1, le=100),
+    skip: int = Query(0, ge=0)
+):
     client = get_db_client()
     if not client:
         return {"error": "Database connection error"}
@@ -15,7 +19,7 @@ async def get_user_history(current_user: dict = Depends(get_current_user)):
         db = client["jewelify"]
         predictions_collection = db["recommendations"]
         reviews_collection = db["reviews"]
-        predictions = list(predictions_collection.find({"user_id": ObjectId(current_user["_id"])}).sort("timestamp", -1))
+        predictions = list(predictions_collection.find({"user_id": ObjectId(current_user["_id"])}).sort("timestamp", -1).skip(skip).limit(limit))
     except Exception as e:
         return {"error": "Database error: " + str(e)}
 

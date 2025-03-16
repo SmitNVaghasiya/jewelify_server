@@ -142,13 +142,15 @@ def get_prediction_by_id(prediction_id, user_id):
                 "score": prediction["xgboost_score"],
                 "category": prediction["xgboost_category"],
                 "recommendations": prediction["xgboost_recommendations"],
-                "overall_feedback": overall_feedback["prediction1"] if overall_feedback["prediction1"] is not None else "Not Provided"
+                "overall_feedback": overall_feedback["prediction1"] if overall_feedback["prediction1"] is not None else "Not Provided",
+                "feedback_required": "Overall feedback for prediction1 is required" if overall_feedback["prediction1"] is None else None
             },
             "prediction2": {
                 "score": prediction["mlp_score"],
                 "category": prediction["mlp_category"],
                 "recommendations": prediction["mlp_recommendations"],
-                "overall_feedback": overall_feedback["prediction2"] if overall_feedback["prediction2"] is not None else "Not Provided"
+                "overall_feedback": overall_feedback["prediction2"] if overall_feedback["prediction2"] is not None else "Not Provided",
+                "feedback_required": "Overall feedback for prediction2 is required" if overall_feedback["prediction2"] is None else None
             },
             "face_image_path": prediction.get("face_image_path"),
             "jewelry_image_path": prediction.get("jewelry_image_path"),
