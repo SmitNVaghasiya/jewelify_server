@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from services.database import get_db_client
-from services.auth import hash_password, create_access_token, verify_password
+from services.auth import hash_password, create_access_token, verify_password, generate_otp, send_otp_via_sms, store_otp, verify_otp
 from datetime import datetime
 import os
 import logging
@@ -18,17 +18,20 @@ class UserRegister(BaseModel):
     username: str
     mobileNo: str
     password: str
-    id: str  # Firebase UID, will be ignored in storage
 
 class UserOut(BaseModel):
     id: str
     username: str
     mobileNo: str
     created_at: str
-    access_token: str = None  # Optional, included in /register response
+    access_token: str = None
 
 class OtpRequest(BaseModel):
     mobileNo: str
+
+class OtpVerify(BaseModel):
+    mobileNo: str
+    otp: str
 
 @router.get("/check-user/{mobile_no}")
 async def check_user(mobile_no: str):
@@ -44,13 +47,45 @@ async def check_user(mobile_no: str):
 
 @router.post("/send-otp")
 async def send_otp(request: OtpRequest):
-    """Placeholder endpoint for sending OTP (handled by Firebase)."""
+    """Generate and send OTP to the user's mobile number via SMS."""
+    mobile_no = request.mobileNo
     try:
-        logger.info(f"Request to send OTP for {request.mobileNo} - Handled by Firebase")
-        return {"message": "OTP sending initiated (handled by Firebase)"}
+        # Validate mobile number format
+        if not mobile_no.startswith('+') or len(mobile_no) < 10:
+            raise HTTPException(status_code=400, detail="Invalid mobile number format. Use +[country code][number]")
+        
+        # Generate OTP
+        otp = generate_otp()
+        # Send OTP via SMS
+        if not send_otp_via_sms(mobile_no, otp):
+            raise HTTPException(status_code=500, detail="Failed to send OTP via SMS")
+        # Store OTP in the database
+        if not store_otp(mobile_no, otp):
+            raise HTTPException(status_code=500, detail="Failed to store OTP")
+        logger.info(f"OTP sent to {mobile_no}")
+        return {"message": f"OTP sent to {mobile_no}"}
+    except HTTPException as e:
+        raise e
     except Exception as e:
-        logger.error(f"Error processing OTP request: {e}")
+        logger.error(f"Error sending OTP to {mobile_no}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process OTP request: {str(e)}")
+
+@router.post("/verify-otp")
+async def verify_otp_endpoint(request: OtpVerify):
+    """Verify the OTP provided by the user."""
+    mobile_no = request.mobileNo
+    otp = request.otp
+    try:
+        if not mobile_no.startswith('+') or len(mobile_no) < 10:
+            raise HTTPException(status_code=400, detail="Invalid mobile number format. Use +[country code][number]")
+        if not verify_otp(mobile_no, otp):
+            raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+        return {"message": "OTP verified successfully"}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error verifying OTP for {mobile_no}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to verify OTP: {str(e)}")
 
 @router.post("/register", response_model=UserOut)
 async def register(user: UserRegister):

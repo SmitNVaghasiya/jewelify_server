@@ -17,3 +17,4 @@ requests==2.31.0
 bcrypt==3.2.0
 # Added for XGBoost support, compatible with numpy==1.26.4 and scikit-learn==1.6.1
 xgboost==2.1.1
+twilio==9.5.0
