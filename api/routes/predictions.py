@@ -11,13 +11,10 @@ load_dotenv()
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 predictor = get_predictor(
     os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model"),
-    os.getenv("FNN_MODEL_PATH", "FNN_improved_v5.keras"),
+    os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras"),
     os.getenv("XGBOOST_SCALER_PATH", "scaler_xgboost_v1.pkl"),
-    os.getenv("FNN_SCALER_PATH", "FNN_improved_v5_scaler.pkl"),
+    os.getenv("MLP_SCALER_PATH", "scaler_mlp_v1.pkl"),
     os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy"),
-    os.getenv("FACE_FEATURES_PATH", "face_features.npy"),
-    os.getenv("EARRING_FEATURES_PATH", "earrings_features.npy"),
-    os.getenv("NECKLACE_FEATURES_PATH", "necklace_features.npy")
 )
 
 @router.post("/predict")
@@ -32,13 +29,10 @@ async def predict(
     if predictor is None:
         predictor = get_predictor(
             os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model"),
-            os.getenv("FNN_MODEL_PATH", "FNN_improved_v5.keras"),
+            os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras"),
             os.getenv("XGBOOST_SCALER_PATH", "scaler_xgboost_v1.pkl"),
-            os.getenv("FNN_SCALER_PATH", "FNN_improved_v5_scaler.pkl"),
+            os.getenv("MLP_SCALER_PATH", "scaler_mlp_v1.pkl"),
             os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy"),
-            os.getenv("FACE_FEATURES_PATH", "face_features.npy"),
-            os.getenv("EARRING_FEATURES_PATH", "earrings_features.npy"),
-            os.getenv("NECKLACE_FEATURES_PATH", "necklace_features.npy")
         )
         if predictor is None:
             raise HTTPException(status_code=500, detail="Model is not loaded properly")
@@ -53,22 +47,35 @@ async def predict(
         raise HTTPException(status_code=400, detail=f"Failed to read uploaded images: {str(e)}")
 
     try:
-        xgboost_score, xgboost_category, xgboost_recommendations, fnn_score, fnn_category, fnn_recommendations = predict_both(predictor, face_data, jewelry_data)
-        if xgboost_category in ["Invalid face image", "Invalid jewelry image"] or fnn_category in ["Invalid face image", "Invalid jewelry image"]:
-            if "face" in xgboost_category or "face" in fnn_category:
+        xgboost_score, xgboost_category, xgboost_recommendations, mlp_score, mlp_category, mlp_recommendations = predict_both(predictor, face_data, jewelry_data)
+        if xgboost_category in ["Invalid face image", "Invalid jewelry image"] or mlp_category in ["Invalid face image", "Invalid jewelry image"]:
+            if "face" in xgboost_category.lower() or "face" in mlp_category.lower():
                 raise HTTPException(status_code=400, detail="Uploaded face image is invalid")
-            if "jewelry" in xgboost_category or "jewelry" in fnn_category:
+            if "jewelry" in xgboost_category.lower() or "jewelry" in mlp_category.lower():
                 raise HTTPException(status_code=400, detail="Uploaded jewelry image is invalid")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
-    if xgboost_score is None or fnn_score is None:
+    if xgboost_score is None or mlp_score is None:
         raise HTTPException(status_code=500, detail="Prediction failed")
+
+    # Ensure exactly 10 recommendations per model (already handled by predictor, but as a safeguard)
+    if len(xgboost_recommendations) < 10:
+        for i in range(len(xgboost_recommendations), 10):
+            xgboost_recommendations.append({"name": f"fallback_xgboost_{i}", "score": 50.0, "category": "Neutral"})
+    else:
+        xgboost_recommendations = xgboost_recommendations[:10]
+
+    if len(mlp_recommendations) < 10:
+        for i in range(len(mlp_recommendations), 10):
+            mlp_recommendations.append({"name": f"fallback_mlp_{i}", "score": 50.0, "category": "Neutral"})
+    else:
+        mlp_recommendations = mlp_recommendations[:10]
 
     try:
         prediction_id = save_prediction(
             xgboost_score, xgboost_category, xgboost_recommendations,
-            fnn_score, fnn_category, fnn_recommendations,
+            mlp_score, mlp_category, mlp_recommendations,
             str(current_user["_id"]),
             face_image_path,
             jewelry_image_path
@@ -76,18 +83,21 @@ async def predict(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save prediction: {str(e)}")
 
+    # Indicate that overall feedback is required
     return {
         "prediction_id": prediction_id,
         "user_id": str(current_user["_id"]),
         "prediction1": {
             "score": round(xgboost_score, 2),
             "category": xgboost_category,
-            "recommendations": xgboost_recommendations
+            "recommendations": xgboost_recommendations,
+            "feedback_required": "Overall feedback for prediction1 is required"
         },
         "prediction2": {
-            "score": round(fnn_score, 2),
-            "category": fnn_category,
-            "recommendations": fnn_recommendations
+            "score": round(mlp_score, 2),
+            "category": mlp_category,
+            "recommendations": mlp_recommendations,
+            "feedback_required": "Overall feedback for prediction2 is required"
         },
         "face_image_path": face_image_path,
         "jewelry_image_path": jewelry_image_path
@@ -108,6 +118,11 @@ async def get_prediction(
         raise HTTPException(status_code=status_code, detail=result["error"])
 
     result["user_id"] = str(current_user["_id"])
+    # Check if overall feedback is missing and add requirement notice
+    if result["prediction1"]["overall_feedback"] == "Not Provided":
+        result["prediction1"]["feedback_required"] = "Overall feedback for prediction1 is required"
+    if result["prediction2"]["overall_feedback"] == "Not Provided":
+        result["prediction2"]["feedback_required"] = "Overall feedback for prediction2 is required"
     return result
 
 @router.post("/feedback/recommendation")
@@ -115,12 +130,12 @@ async def submit_recommendation_feedback(
     prediction_id: str = Form(...),
     model_type: str = Form(...),  # "prediction1" or "prediction2"
     recommendation_name: str = Form(...),
-    review: str = Form(...),  # "yes", "no", "neutral"
+    score: float = Form(None),  # Optional, defaults to None
     current_user: dict = Depends(get_current_user)
 ):
-    valid_reviews = {"yes", "no", "neutral"}
-    if review not in valid_reviews:
-        raise HTTPException(status_code=400, detail="Review must be 'yes', 'no', or 'neutral'")
+    # Score is optional for individual recommendations
+    if score is not None and not (0 <= score <= 1):
+        raise HTTPException(status_code=400, detail="Score must be between 0 and 1 if provided")
 
     if model_type not in ["prediction1", "prediction2"]:
         raise HTTPException(status_code=400, detail="Model type must be 'prediction1' or 'prediction2'")
@@ -130,24 +145,24 @@ async def submit_recommendation_feedback(
         prediction_id,
         model_type,
         recommendation_name,
-        review,
+        score if score is not None else 0.5,  # Default to 0.5 if not provided
         feedback_type="recommendation"
     )
     if not success:
-        raise HTTPException(status_code=500, detail="Failed to save review")
+        raise HTTPException(status_code=500, detail="Failed to save feedback")
 
-    return {"message": "Recommendation review saved successfully"}
+    return {"message": "Recommendation feedback saved successfully (optional)"}
 
 @router.post("/feedback/prediction")
 async def submit_prediction_feedback(
     prediction_id: str = Form(...),
     model_type: str = Form(...),  # "prediction1" or "prediction2"
-    review: str = Form(...),  # "yes", "no", "neutral"
+    score: float = Form(...),  # Required
     current_user: dict = Depends(get_current_user)
 ):
-    valid_reviews = {"yes", "no", "neutral"}
-    if review not in valid_reviews:
-        raise HTTPException(status_code=400, detail="Review must be 'yes', 'no', or 'neutral'")
+    # Validate required score
+    if not (0 <= score <= 1):
+        raise HTTPException(status_code=400, detail="Score must be between 0 and 1")
 
     if model_type not in ["prediction1", "prediction2"]:
         raise HTTPException(status_code=400, detail="Model type must be 'prediction1' or 'prediction2'")
@@ -157,10 +172,10 @@ async def submit_prediction_feedback(
         prediction_id,
         model_type,
         recommendation_name=None,
-        review=review,
+        score=score,
         feedback_type="prediction"
     )
     if not success:
-        raise HTTPException(status_code=500, detail="Failed to save review")
+        raise HTTPException(status_code=500, detail="Failed to save feedback")
 
-    return {"message": "Prediction review saved successfully"}
+    return {"message": "Prediction feedback saved successfully"}

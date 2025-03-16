@@ -37,7 +37,7 @@ async def get_user_history(current_user: dict = Depends(get_current_user)):
         for review in recommendation_reviews:
             model_type = review["model_type"]
             if model_type in individual_feedback:
-                individual_feedback[model_type][review["recommendation_name"]] = review["review"]
+                individual_feedback[model_type][review["recommendation_name"]] = review["score"]
 
         # Fetch overall prediction feedback
         prediction_reviews = list(reviews_collection.find({
@@ -45,48 +45,52 @@ async def get_user_history(current_user: dict = Depends(get_current_user)):
             "user_id": ObjectId(user_id),
             "feedback_type": "prediction"
         }))
-        overall_feedback = {"prediction1": "Not Provided", "prediction2": "Not Provided"}
+        overall_feedback = {"prediction1": None, "prediction2": None}
         for review in prediction_reviews:
             model_type = review["model_type"]
             if model_type in overall_feedback:
-                overall_feedback[model_type] = review["review"]
-
-        # Determine liked recommendations
-        liked = {"prediction1": [], "prediction2": []}
-        for model_type, rec_field in [("prediction1", "xgboost_recommendations"), ("prediction2", "fnn_recommendations")]:
-            model_recs = pred.get(rec_field, [])
-            model_individual_feedback = individual_feedback[model_type]
-            model_overall_feedback = overall_feedback[model_type]
-
-            for rec in model_recs:
-                rec_name = rec["name"]
-                # Check individual feedback first
-                if rec_name in model_individual_feedback:
-                    if model_individual_feedback[rec_name] == "yes":
-                        liked[model_type].append(rec_name)
-                # If no individual feedback, use overall feedback
-                elif model_overall_feedback == "yes":
-                    liked[model_type].append(rec_name)
+                overall_feedback[model_type] = review["score"]
 
         # Process recommendations for each model
         xgboost_recs = pred.get("xgboost_recommendations", [])
-        fnn_recs = pred.get("fnn_recommendations", [])
+        mlp_recs = pred.get("mlp_recommendations", [])
 
-        # Add liked status
+        # Apply feedback scores to recommendations
         for rec in xgboost_recs:
-            rec["liked"] = rec["name"] in liked["prediction1"]
-        for rec in fnn_recs:
-            rec["liked"] = rec["name"] in liked["prediction2"]
+            rec_name = rec["name"]
+            # Default liked status based on model prediction score
+            rec["liked"] = rec["score"] >= 75.0
+            # Apply user score: individual feedback takes precedence, else use overall feedback
+            if rec_name in individual_feedback["prediction1"]:
+                rec["user_score"] = individual_feedback["prediction1"][rec_name]
+                rec["liked"] = rec["user_score"] >= 0.75
+            elif overall_feedback["prediction1"] is not None:
+                rec["user_score"] = overall_feedback["prediction1"]
+                rec["liked"] = rec["user_score"] >= 0.75
+            else:
+                rec["user_score"] = None  # Will trigger feedback requirement
+
+        for rec in mlp_recs:
+            rec_name = rec["name"]
+            # Default liked status based on model prediction score
+            rec["liked"] = rec["score"] >= 75.0
+            # Apply user score: individual feedback takes precedence, else use overall feedback
+            if rec_name in individual_feedback["prediction2"]:
+                rec["user_score"] = individual_feedback["prediction2"][rec_name]
+                rec["liked"] = rec["user_score"] >= 0.75
+            elif overall_feedback["prediction2"] is not None:
+                rec["user_score"] = overall_feedback["prediction2"]
+                rec["liked"] = rec["user_score"] >= 0.75
+            else:
+                rec["user_score"] = None  # Will trigger feedback requirement
 
         # Sort: liked first, then by score
         xgboost_sorted = sorted(xgboost_recs, key=lambda x: (x["liked"], x["score"]), reverse=True)
-        fnn_sorted = sorted(fnn_recs, key=lambda x: (x["liked"], x["score"]), reverse=True)
+        mlp_sorted = sorted(mlp_recs, key=lambda x: (x["liked"], x["score"]), reverse=True)
 
-        # Ensure at least 10 recommendations
-        liked_xgboost_count = len([r for r in xgboost_sorted if r["liked"]])
-        liked_fnn_count = len([r for r in fnn_sorted if r["liked"]])
-        xgboost_display = xgboost_sorted[:max(10, liked_xgboost_count)]
-        fnn_display = fnn_sorted[:max(10, liked_fnn_count)]
+        # Enforce exactly 10 recommendations per model
+        xgboost_display = xgboost_sorted[:10]
+        mlp_display = mlp_sorted[:10]
 
         results.append({
             "id": prediction_id,
@@ -95,13 +99,15 @@ async def get_user_history(current_user: dict = Depends(get_current_user)):
                 "score": pred["xgboost_score"],
                 "category": pred["xgboost_category"],
                 "recommendations": xgboost_display,
-                "overall_feedback": overall_feedback["prediction1"]
+                "overall_feedback": overall_feedback["prediction1"] if overall_feedback["prediction1"] is not None else "Not Provided",
+                "feedback_required": "Overall feedback for prediction1 is required" if overall_feedback["prediction1"] is None else None
             },
             "prediction2": {
-                "score": pred["fnn_score"],
-                "category": pred["fnn_category"],
-                "recommendations": fnn_display,
-                "overall_feedback": overall_feedback["prediction2"]
+                "score": pred["mlp_score"],
+                "category": pred["mlp_category"],
+                "recommendations": mlp_display,
+                "overall_feedback": overall_feedback["prediction2"] if overall_feedback["prediction2"] is not None else "Not Provided",
+                "feedback_required": "Overall feedback for prediction2 is required" if overall_feedback["prediction2"] is None else None
             },
             "face_image_path": pred.get("face_image_path"),
             "jewelry_image_path": pred.get("jewelry_image_path"),

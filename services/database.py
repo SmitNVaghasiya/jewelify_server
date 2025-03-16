@@ -38,7 +38,7 @@ def rebuild_client():
         logger.error(f"Failed to rebuild MongoDB client: {e}")
         return False
 
-def save_prediction(xgboost_score, xgboost_category, xgboost_recommendations, fnn_score, fnn_category, fnn_recommendations, user_id, face_image_path, jewelry_image_path):
+def save_prediction(xgboost_score, xgboost_category, xgboost_recommendations, mlp_score, mlp_category, mlp_recommendations, user_id, face_image_path, jewelry_image_path):
     client = get_db_client()
     if not client:
         logger.warning("No MongoDB client available, attempting to rebuild")
@@ -55,9 +55,9 @@ def save_prediction(xgboost_score, xgboost_category, xgboost_recommendations, fn
             "xgboost_score": xgboost_score,
             "xgboost_category": xgboost_category,
             "xgboost_recommendations": xgboost_recommendations,
-            "fnn_score": fnn_score,
-            "fnn_category": fnn_category,
-            "fnn_recommendations": fnn_recommendations,
+            "mlp_score": mlp_score,
+            "mlp_category": mlp_category,
+            "mlp_recommendations": mlp_recommendations,
             "face_image_path": face_image_path,
             "jewelry_image_path": jewelry_image_path,
             "timestamp": datetime.utcnow().isoformat()
@@ -100,7 +100,7 @@ def get_prediction_by_id(prediction_id, user_id):
         for review in recommendation_reviews:
             model_type = review["model_type"]
             if model_type in individual_feedback:
-                individual_feedback[model_type][review["recommendation_name"]] = review["review"]
+                individual_feedback[model_type][review["recommendation_name"]] = review["score"]
 
         # Fetch overall prediction feedback
         prediction_reviews = list(reviews_collection.find({
@@ -108,31 +108,29 @@ def get_prediction_by_id(prediction_id, user_id):
             "user_id": ObjectId(user_id),
             "feedback_type": "prediction"
         }))
-        overall_feedback = {"prediction1": "Not Provided", "prediction2": "Not Provided"}
+        overall_feedback = {"prediction1": None, "prediction2": None}
         for review in prediction_reviews:
             model_type = review["model_type"]
             if model_type in overall_feedback:
-                overall_feedback[model_type] = review["review"]
+                overall_feedback[model_type] = review["score"]
 
-        # Determine liked recommendations (individual feedback takes precedence)
+        # Determine liked recommendations
         liked = {"prediction1": [], "prediction2": []}
-        for model_type, rec_field in [("prediction1", "xgboost_recommendations"), ("prediction2", "fnn_recommendations")]:
+        for model_type, rec_field in [("prediction1", "xgboost_recommendations"), ("prediction2", "mlp_recommendations")]:
             model_recs = prediction.get(rec_field, [])
             model_individual_feedback = individual_feedback[model_type]
             model_overall_feedback = overall_feedback[model_type]
 
             for rec in model_recs:
                 rec_name = rec["name"]
-                # Check individual feedback first
                 if rec_name in model_individual_feedback:
-                    if model_individual_feedback[rec_name] == "yes":
+                    if model_individual_feedback[rec_name] >= 0.75:
                         liked[model_type].append(rec_name)
-                # If no individual feedback, use overall feedback
-                elif model_overall_feedback == "yes":
+                elif model_overall_feedback is not None and model_overall_feedback >= 0.75:
                     liked[model_type].append(rec_name)
 
         # Add liked status to recommendations
-        for model_type, rec_field in [("prediction1", "xgboost_recommendations"), ("prediction2", "fnn_recommendations")]:
+        for model_type, rec_field in [("prediction1", "xgboost_recommendations"), ("prediction2", "mlp_recommendations")]:
             if rec_field in prediction:
                 for rec in prediction[rec_field]:
                     rec["liked"] = rec["name"] in liked[model_type]
@@ -144,13 +142,13 @@ def get_prediction_by_id(prediction_id, user_id):
                 "score": prediction["xgboost_score"],
                 "category": prediction["xgboost_category"],
                 "recommendations": prediction["xgboost_recommendations"],
-                "overall_feedback": overall_feedback["prediction1"]
+                "overall_feedback": overall_feedback["prediction1"] if overall_feedback["prediction1"] is not None else "Not Provided"
             },
             "prediction2": {
-                "score": prediction["fnn_score"],
-                "category": prediction["fnn_category"],
-                "recommendations": prediction["fnn_recommendations"],
-                "overall_feedback": overall_feedback["prediction2"]
+                "score": prediction["mlp_score"],
+                "category": prediction["mlp_category"],
+                "recommendations": prediction["mlp_recommendations"],
+                "overall_feedback": overall_feedback["prediction2"] if overall_feedback["prediction2"] is not None else "Not Provided"
             },
             "face_image_path": prediction.get("face_image_path"),
             "jewelry_image_path": prediction.get("jewelry_image_path"),
@@ -162,7 +160,7 @@ def get_prediction_by_id(prediction_id, user_id):
         logger.error(f"Error retrieving prediction from MongoDB: {e}")
         return {"error": f"Database error: {str(e)}"}
 
-def save_review(user_id, prediction_id, model_type, recommendation_name, review, feedback_type):
+def save_review(user_id, prediction_id, model_type, recommendation_name, score, feedback_type):
     client = get_db_client()
     if not client:
         logger.warning("No MongoDB client available, attempting to rebuild")
@@ -179,7 +177,7 @@ def save_review(user_id, prediction_id, model_type, recommendation_name, review,
             "prediction_id": ObjectId(prediction_id),
             "model_type": model_type,
             "recommendation_name": recommendation_name,
-            "review": review,
+            "score": float(score),
             "feedback_type": feedback_type,
             "timestamp": datetime.utcnow().isoformat()
         }
