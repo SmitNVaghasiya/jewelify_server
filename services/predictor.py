@@ -9,6 +9,10 @@ from typing import List, Tuple, Optional
 import asyncio
 import os
 import time
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -17,12 +21,16 @@ logger = logging.getLogger(__name__)
 class JewelryPredictor:
     def __init__(self, device: str = "CPU"):
         self.device = device
-        # Load Haar Cascade for face detection
+        # Load Haar Cascade file from the same directory
         cascade_path = os.path.join(os.path.dirname(__file__), "haarcascade_frontalface_default.xml")
         self.face_cascade = cv2.CascadeClassifier(cascade_path)
         if self.face_cascade.empty():
-            logger.error("Failed to load Haar Cascade for face detection")
-            raise Exception("Failed to load Haar Cascade for face detection")
+            logger.error(f"Failed to load Haar Cascade file at {cascade_path}")
+            self.face_cascade = None  # Set to None to allow fallback or skip face validation
+        else:
+            logger.info("Haar Cascade loaded successfully")
+
+        # Load models and features using environment variables
         self.mobile_net = tf.keras.applications.MobileNetV2(
             input_shape=(224, 224, 3),
             include_top=False,
@@ -32,14 +40,13 @@ class JewelryPredictor:
         self.xgboost_model = self.load_xgboost_model()
         self.mlp_model = self.load_mlp_model()
         self.jewelry_categories = ["Earring", "Necklace", "Bracelet", "Ring", "Not Assigned"]
-        # Cache pairwise features in memory
         self.pairwise_features = self.load_pairwise_features()
 
     def load_xgboost_model(self) -> xgb.XGBClassifier:
         try:
             logger.info("Loading XGBoost model...")
             start_time = time.time()
-            model_path = os.path.join(os.path.dirname(__file__), "xgboost_model.pkl")
+            model_path = os.path.join(os.path.dirname(__file__), os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model"))
             with open(model_path, "rb") as file:
                 model = pickle.load(file)
             logger.info(f"XGBoost model loaded in {time.time() - start_time:.2f} seconds")
@@ -52,9 +59,8 @@ class JewelryPredictor:
         try:
             logger.info("Loading MLP model...")
             start_time = time.time()
-            model_path = os.path.join(os.path.dirname(__file__), "mlp_model.pkl")
-            with open(model_path, "rb") as file:
-                model = pickle.load(file)
+            model_path = os.path.join(os.path.dirname(__file__), os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras"))
+            model = tf.keras.models.load_model(model_path)  # Load Keras model
             logger.info(f"MLP model loaded in {time.time() - start_time:.2f} seconds")
             return model
         except Exception as e:
@@ -65,7 +71,7 @@ class JewelryPredictor:
         try:
             logger.info("Loading pairwise features...")
             start_time = time.time()
-            features_path = os.path.join(os.path.dirname(__file__), "pairwise_features.npy")
+            features_path = os.path.join(os.path.dirname(__file__), os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy"))
             features = np.load(features_path)
             logger.info(f"Pairwise features loaded in {time.time() - start_time:.2f} seconds")
             return features
@@ -103,6 +109,9 @@ class JewelryPredictor:
     def validate_face_image(self, image: np.ndarray) -> Tuple[bool, str]:
         logger.info("Validating face image...")
         start_time = time.time()
+        if self.face_cascade is None:
+            logger.warning("Haar Cascade not loaded, skipping face validation")
+            return True, "Validation skipped (Haar Cascade not loaded)"
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(
             gray,
