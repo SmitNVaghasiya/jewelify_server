@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from dotenv import load_dotenv
 import uvicorn
 from api.routes import auth, predictions, history
+from keep_alive import start_keep_alive
 
 # Load environment variables
 load_dotenv()
@@ -14,6 +15,9 @@ app = FastAPI(title="Jewelify API", description="API for Jewelify application")
 app.include_router(auth.router)
 app.include_router(predictions.router)
 app.include_router(history.router)
+
+# Start keep-alive task
+start_keep_alive(app)
 
 # Home endpoint
 @app.get('/')
