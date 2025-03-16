@@ -8,15 +8,13 @@ python-multipart==0.0.20
 nest_asyncio==1.6.0
 python-dotenv==1.0.1
 pydantic==2.10.6
-scikit-learn==1.5.2  # Corrected from 1.6.1 (likely a typo; verify if intentional)
+scikit-learn==1.5.2
 pymongo[srv]==4.11.1
 passlib[bcrypt]==1.7.4
-python-jose==3.3.0
+python-jose[cryptography]==3.3.0  # Updated to include cryptography backend
 pyyaml==6.0.1
-requests==2.32.3  # Updated from 2.31.0
-# Ensure bcrypt is compatible with passlib
-bcrypt==4.2.0  # Updated from 3.2.0
-# Added for XGBoost support, compatible with numpy==1.26.4 and scikit-learn==1.5.2
+requests==2.32.3
+bcrypt==4.2.0
 xgboost==2.1.1
 twilio==9.5.0
 opencv-python==4.11.0.86

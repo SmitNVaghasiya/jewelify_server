@@ -1,15 +1,15 @@
+# services/predictor.py
 import cv2
 import numpy as np
 import tensorflow as tf
 import xgboost as xgb
 import pickle
 import logging
-from sklearn.neural_network import MLPClassifier
+import os
 from typing import List, Tuple, Optional
 import asyncio
-import os
-import time
 from dotenv import load_dotenv
+import time
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,22 +21,37 @@ logger = logging.getLogger(__name__)
 class JewelryPredictor:
     def __init__(self, device: str = "CPU"):
         self.device = device
-        # Load Haar Cascade file from the same directory
-        cascade_path = os.path.join(os.path.dirname(__file__), "haarcascade_frontalface_default.xml")
-        self.face_cascade = cv2.CascadeClassifier(cascade_path)
-        if self.face_cascade.empty():
-            logger.error(f"Failed to load Haar Cascade file at {cascade_path}")
-            self.face_cascade = None  # Set to None to allow fallback or skip face validation
+        
+        # Load Haar Cascade file
+        # Since haarcascade_frontalface_default.xml is in the root directory (one level up from services/),
+        # we need to go up one directory level from the current file's directory
+        root_dir = os.path.dirname(os.path.dirname(__file__))  # Go up one level from services/ to root
+        cascade_path = os.getenv("HAAR_CASCADE_PATH", os.path.join(root_dir, "haarcascade_frontalface_default.xml"))
+        if not os.path.exists(cascade_path):
+            logger.warning(f"Haar Cascade file not found at {cascade_path}. Face validation will be skipped.")
+            self.face_cascade = None
         else:
-            logger.info("Haar Cascade loaded successfully")
+            self.face_cascade = cv2.CascadeClassifier(cascade_path)
+            if self.face_cascade.empty():
+                logger.warning(f"Failed to load Haar Cascade file at {cascade_path}. Face validation will be skipped.")
+                self.face_cascade = None
+            else:
+                logger.info("Haar Cascade loaded successfully")
 
-        # Load models and features using environment variables
-        self.mobile_net = tf.keras.applications.MobileNetV2(
-            input_shape=(224, 224, 3),
-            include_top=False,
-            weights="imagenet",
-            pooling="avg",
-        )
+        # Load MobileNetV2 model
+        try:
+            self.mobile_net = tf.keras.applications.MobileNetV2(
+                input_shape=(224, 224, 3),
+                include_top=False,
+                weights="imagenet",
+                pooling="avg",
+            )
+            logger.info("MobileNetV2 model loaded successfully")
+        except Exception as e:
+            logger.error(f"Error loading MobileNetV2 model: {str(e)}")
+            raise RuntimeError(f"Failed to load MobileNetV2 model: {str(e)}")
+
+        # Load XGBoost and MLP models
         self.xgboost_model = self.load_xgboost_model()
         self.mlp_model = self.load_mlp_model()
         self.jewelry_categories = ["Earring", "Necklace", "Bracelet", "Ring", "Not Assigned"]
@@ -46,38 +61,50 @@ class JewelryPredictor:
         try:
             logger.info("Loading XGBoost model...")
             start_time = time.time()
-            model_path = os.path.join(os.path.dirname(__file__), os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model"))
+            # Adjust path to root directory (one level up from services/)
+            root_dir = os.path.dirname(os.path.dirname(__file__))
+            model_path = os.getenv("XGBOOST_MODEL_PATH", os.path.join(root_dir, "xgboost_jewelry_v1.model"))
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"XGBoost model file not found at {model_path}")
             with open(model_path, "rb") as file:
                 model = pickle.load(file)
             logger.info(f"XGBoost model loaded in {time.time() - start_time:.2f} seconds")
             return model
         except Exception as e:
             logger.error(f"Error loading XGBoost model: {str(e)}")
-            raise
+            raise RuntimeError(f"Failed to load XGBoost model: {str(e)}")
 
-    def load_mlp_model(self) -> MLPClassifier:
+    def load_mlp_model(self) -> Optional[tf.keras.Model]:
         try:
             logger.info("Loading MLP model...")
             start_time = time.time()
-            model_path = os.path.join(os.path.dirname(__file__), os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras"))
-            model = tf.keras.models.load_model(model_path)  # Load Keras model
+            # Adjust path to root directory (one level up from services/)
+            root_dir = os.path.dirname(os.path.dirname(__file__))
+            model_path = os.getenv("MLP_MODEL_PATH", os.path.join(root_dir, "mlp_jewelry_v1.keras"))
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"MLP model file not found at {model_path}")
+            model = tf.keras.models.load_model(model_path)
             logger.info(f"MLP model loaded in {time.time() - start_time:.2f} seconds")
             return model
         except Exception as e:
             logger.error(f"Error loading MLP model: {str(e)}")
-            raise
+            raise RuntimeError(f"Failed to load MLP model: {str(e)}")
 
     def load_pairwise_features(self) -> np.ndarray:
         try:
             logger.info("Loading pairwise features...")
             start_time = time.time()
-            features_path = os.path.join(os.path.dirname(__file__), os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy"))
+            # Adjust path to root directory (one level up from services/)
+            root_dir = os.path.dirname(os.path.dirname(__file__))
+            features_path = os.getenv("PAIRWISE_FEATURES_PATH", os.path.join(root_dir, "pairwise_features.npy"))
+            if not os.path.exists(features_path):
+                raise FileNotFoundError(f"Pairwise features file not found at {features_path}")
             features = np.load(features_path)
             logger.info(f"Pairwise features loaded in {time.time() - start_time:.2f} seconds")
             return features
         except Exception as e:
             logger.error(f"Error loading pairwise features: {str(e)}")
-            raise
+            raise RuntimeError(f"Failed to load pairwise features: {str(e)}")
 
     def preprocess_image(self, image: np.ndarray) -> np.ndarray:
         logger.debug("Preprocessing image...")
