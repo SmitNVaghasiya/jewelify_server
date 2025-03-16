@@ -7,8 +7,12 @@ from typing import Optional
 from datetime import datetime
 import logging
 import os
+from dotenv import load_dotenv
 from .auth import get_current_user
 from services.predictor import JewelryPredictor
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -17,7 +21,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # MongoDB client
-client = AsyncIOMotorClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))
+mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+client = AsyncIOMotorClient(mongo_uri)
 db = client["jewelry_db"]
 predictions_collection: Collection = db["predictions"]
 

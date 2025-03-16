@@ -1,4 +1,3 @@
-# services/predictor.py
 import cv2
 import numpy as np
 import tensorflow as tf
@@ -24,14 +23,15 @@ class JewelryPredictor:
         
         # Load Haar Cascade file
         root_dir = os.path.dirname(os.path.dirname(__file__))  # Go up one level from services/ to root
-        cascade_path = os.getenv("HAAR_CASCADE_PATH", os.path.join(root_dir, "haarcascade_frontalface_default.xml"))
-        if not os.path.exists(cascade_path):
-            logger.warning(f"Haar Cascade file not found at {cascade_path}. Face validation will be skipped.")
+        cascade_path = os.getenv("HAAR_CASCADE_PATH", "haarcascade_frontalface_default.xml")
+        cascade_full_path = os.path.join(root_dir, cascade_path)
+        if not os.path.exists(cascade_full_path):
+            logger.warning(f"Haar Cascade file not found at {cascade_full_path}. Face validation will be skipped.")
             self.face_cascade = None
         else:
-            self.face_cascade = cv2.CascadeClassifier(cascade_path)
+            self.face_cascade = cv2.CascadeClassifier(cascade_full_path)
             if self.face_cascade.empty():
-                logger.warning(f"Failed to load Haar Cascade file at {cascade_path}. Face validation will be skipped.")
+                logger.warning(f"Failed to load Haar Cascade file at {cascade_full_path}. Face validation will be skipped.")
                 self.face_cascade = None
             else:
                 logger.info("Haar Cascade loaded successfully")
@@ -61,13 +61,14 @@ class JewelryPredictor:
             logger.info("Loading XGBoost model...")
             start_time = time.time()
             root_dir = os.path.dirname(os.path.dirname(__file__))
-            model_path = os.getenv("XGBOOST_MODEL_PATH", os.path.join(root_dir, "xgboost_jewelry_v1.model"))
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"XGBoost model file not found at {model_path}")
+            model_path = os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model")
+            model_full_path = os.path.join(root_dir, model_path)
+            if not os.path.exists(model_full_path):
+                raise FileNotFoundError(f"XGBoost model file not found at {model_full_path}")
             
             # Use XGBoost's native load_model method
             model = xgb.Booster()
-            model.load_model(model_path)
+            model.load_model(model_full_path)
             logger.info(f"XGBoost model loaded in {time.time() - start_time:.2f} seconds")
             return model
         except Exception as e:
@@ -79,10 +80,11 @@ class JewelryPredictor:
             logger.info("Loading MLP model...")
             start_time = time.time()
             root_dir = os.path.dirname(os.path.dirname(__file__))
-            model_path = os.getenv("MLP_MODEL_PATH", os.path.join(root_dir, "mlp_jewelry_v1.keras"))
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"MLP model file not found at {model_path}")
-            model = tf.keras.models.load_model(model_path)
+            model_path = os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras")
+            model_full_path = os.path.join(root_dir, model_path)
+            if not os.path.exists(model_full_path):
+                raise FileNotFoundError(f"MLP model file not found at {model_full_path}")
+            model = tf.keras.models.load_model(model_full_path)
             logger.info(f"MLP model loaded in {time.time() - start_time:.2f} seconds")
             return model
         except Exception as e:
@@ -94,10 +96,11 @@ class JewelryPredictor:
             logger.info("Loading pairwise features...")
             start_time = time.time()
             root_dir = os.path.dirname(os.path.dirname(__file__))
-            features_path = os.getenv("PAIRWISE_FEATURES_PATH", os.path.join(root_dir, "pairwise_features.npy"))
-            if not os.path.exists(features_path):
-                raise FileNotFoundError(f"Pairwise features file not found at {features_path}")
-            features = np.load(features_path)
+            features_path = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+            features_full_path = os.path.join(root_dir, features_path)
+            if not os.path.exists(features_full_path):
+                raise FileNotFoundError(f"Pairwise features file not found at {features_full_path}")
+            features = np.load(features_full_path)
             logger.info(f"Pairwise features loaded in {time.time() - start_time:.2f} seconds")
             return features
         except Exception as e:
@@ -165,9 +168,8 @@ class JewelryPredictor:
         try:
             dmatrix = xgb.DMatrix(features.reshape(1, -1))
             prediction = self.xgboost_model.predict(dmatrix)[0]
-            # Assuming a classification model with class indices; adjust if it's regression
             predicted_class = int(round(prediction)) if 0 <= prediction < len(self.jewelry_categories) else 0
-            confidence = 100.0  # Placeholder; adjust based on your model's output (e.g., probability if available)
+            confidence = 100.0  # Placeholder; adjust based on your model's output
             category = self.jewelry_categories[predicted_class]
         except Exception as e:
             logger.error(f"Error during XGBoost prediction: {str(e)}. Returning fallback values.")
@@ -196,7 +198,6 @@ class JewelryPredictor:
         recommendations = []
         try:
             if self.pairwise_features is not None and len(self.pairwise_features) > 0:
-                # Use distance-based recommendation (consistent with your previous logic)
                 distances = np.linalg.norm(self.pairwise_features - features, axis=1)
                 top_k_indices = np.argsort(distances)[:top_k]
                 for idx in top_k_indices:
@@ -210,7 +211,6 @@ class JewelryPredictor:
                 logger.warning("No pairwise features available, returning empty recommendations.")
         except Exception as e:
             logger.error(f"Error generating XGBoost recommendations: {str(e)}. Returning empty recommendations.")
-        # Ensure top_k recommendations (fill with fallback if needed)
         while len(recommendations) < top_k:
             recommendations.append({
                 "name": f"fallback_xgboost_{len(recommendations)}",
@@ -239,7 +239,6 @@ class JewelryPredictor:
                 logger.warning("No pairwise features available, returning empty recommendations.")
         except Exception as e:
             logger.error(f"Error generating MLP recommendations: {str(e)}. Returning empty recommendations.")
-        # Ensure top_k recommendations (fill with fallback if needed)
         while len(recommendations) < top_k:
             recommendations.append({
                 "name": f"fallback_mlp_{len(recommendations)}",
@@ -262,7 +261,6 @@ class JewelryPredictor:
         jewelry_features = self.extract_features(jewelry_image) if jewelry_image is not None else None
         combined_features = np.concatenate([face_features, jewelry_features]) if face_features is not None and jewelry_features is not None else None
 
-        # Run predictions and recommendations in parallel with fallback
         tasks = [
             self.predict_with_xgboost(combined_features) if combined_features is not None else asyncio.Future(),
             self.predict_with_mlp(combined_features) if combined_features is not None else asyncio.Future(),
@@ -270,7 +268,6 @@ class JewelryPredictor:
             self.get_recommendations_with_mlp(face_features) if face_features is not None else asyncio.Future(),
         ]
 
-        # Replace Future objects with fallback values
         for i, task in enumerate(tasks):
             if isinstance(task, asyncio.Future):
                 tasks[i] = asyncio.Future()
