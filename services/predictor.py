@@ -80,7 +80,7 @@ class JewelryPredictor:
             pairwise_features_path = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
             if not os.path.exists(pairwise_features_path):
                 raise FileNotFoundError(f"Pairwise features file not found at {pairwise_features_path}")
-            # Use allow_pickle=True to handle object arrays, similar to old code
+            # Use allow_pickle=True to handle object arrays
             self.pairwise_features = np.load(pairwise_features_path, allow_pickle=True).item()
             logger.info(f"Pairwise features loaded in {time.time() - start_time:.2f} seconds")
         except Exception as e:
@@ -177,7 +177,6 @@ class JewelryPredictor:
         recommendations = []
         try:
             if self.pairwise_features is not None and len(self.pairwise_features) > 0:
-                # Assuming pairwise_features is a dict; adjust if it's an array
                 if isinstance(self.pairwise_features, dict):
                     distances = {key: np.linalg.norm(val - features) for key, val in self.pairwise_features.items()}
                     sorted_items = sorted(distances.items(), key=lambda x: x[1])[:top_k]
@@ -217,7 +216,6 @@ class JewelryPredictor:
         recommendations = []
         try:
             if self.pairwise_features is not None and len(self.pairwise_features) > 0:
-                # Assuming pairwise_features is a dict; adjust if it's an array
                 if isinstance(self.pairwise_features, dict):
                     distances = {key: np.linalg.norm(val - features) for key, val in self.pairwise_features.items()}
                     sorted_items = sorted(distances.items(), key=lambda x: x[1])[:top_k]
@@ -289,12 +287,14 @@ class JewelryPredictor:
                 "category": xgboost_category,
                 "recommendations": xgboost_recommendations,
                 "feedback_required": True,
+                "overall_feedback": 0.5  # Default to 0.5 if no feedback yet
             },
             "prediction2": {
                 "score": float(mlp_confidence),
                 "category": mlp_category,
                 "recommendations": mlp_recommendations,
                 "feedback_required": True,
+                "overall_feedback": 0.5  # Default to 0.5 if no feedback yet
             },
             "face_image_path": face_image_path,
             "jewelry_image_path": jewelry_image_path,

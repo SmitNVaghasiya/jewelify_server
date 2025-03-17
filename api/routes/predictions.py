@@ -61,12 +61,19 @@ async def predict(
     logger.info("Received prediction request...")
     start_time = datetime.now()
     try:
-        # Read and decode images
+        # Read and decode images (no MIME type validation)
         face_contents = await face.read()
         jewelry_contents = await jewelry.read()
 
         face_image = cv2.imdecode(np.frombuffer(face_contents, np.uint8), cv2.IMREAD_COLOR)
+        if face_image is None:
+            logger.warning("Failed to decode face image")
+            raise HTTPException(status_code=400, detail="Invalid or unsupported face image format")
+
         jewelry_image = cv2.imdecode(np.frombuffer(jewelry_contents, np.uint8), cv2.IMREAD_COLOR)
+        if jewelry_image is None:
+            logger.warning("Failed to decode jewelry image")
+            raise HTTPException(status_code=400, detail="Invalid or unsupported jewelry image format")
 
         # Validate images
         is_valid_face, face_message = predictor.validate_face_image(face_image)
@@ -110,6 +117,17 @@ async def get_prediction(prediction_id: str, user: dict = Depends(get_current_us
         if not prediction:
             logger.warning(f"Prediction {prediction_id} not found")
             raise HTTPException(status_code=404, detail="Prediction not found")
+
+        # Ensure feedback scores default to 0.5 if not provided or invalid
+        prediction["prediction1"] = prediction.get("prediction1", {})
+        prediction["prediction2"] = prediction.get("prediction2", {})
+        
+        overall_feedback1 = prediction["prediction1"].get("overall_feedback")
+        overall_feedback2 = prediction["prediction2"].get("overall_feedback")
+        
+        prediction["prediction1"]["overall_feedback"] = float(overall_feedback1) if overall_feedback1 is not None and overall_feedback1 != "Not Provided" else 0.5
+        prediction["prediction2"]["overall_feedback"] = float(overall_feedback2) if overall_feedback2 is not None and overall_feedback2 != "Not Provided" else 0.5
+
         prediction["prediction_id"] = prediction_id
         logger.info(f"Prediction {prediction_id} fetched in {(datetime.now() - start_time).total_seconds():.2f} seconds")
         return prediction
@@ -136,7 +154,7 @@ async def submit_feedback(
 
         update_data = {}
         if feedback_type == "prediction":
-            update_data[f"{model_type}.overall_feedback"] = score
+            update_data[f"{model_type}.overall_feedback"] = float(score)  # Convert score to float
             update_data[f"{model_type}.feedback_required"] = False
         elif feedback_type == "recommendation":
             if not recommendation_name:
@@ -145,7 +163,7 @@ async def submit_feedback(
             recommendations = prediction[model_type]["recommendations"]
             for rec in recommendations:
                 if rec["name"] == recommendation_name:
-                    rec["feedback"] = score
+                    rec["feedback"] = float(score)  # Convert score to float
                     break
             update_data[f"{model_type}.recommendations"] = recommendations
         else:

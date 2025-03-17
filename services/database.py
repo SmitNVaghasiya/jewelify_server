@@ -38,7 +38,7 @@ def rebuild_client():
         logger.error(f"Failed to rebuild MongoDB client: {e}")
         return False
 
-def save_prediction(xgboost_score, xgboost_category, xgboost_recommendations, mlp_score, mlp_category, mlp_recommendations, user_id, face_image_path, jewelry_image_path):
+def save_prediction(prediction_data: dict, user_id: str):
     client = get_db_client()
     if not client:
         logger.warning("No MongoDB client available, attempting to rebuild")
@@ -52,14 +52,10 @@ def save_prediction(xgboost_score, xgboost_category, xgboost_recommendations, ml
 
         prediction = {
             "user_id": ObjectId(user_id),
-            "xgboost_score": xgboost_score,
-            "xgboost_category": xgboost_category,
-            "xgboost_recommendations": xgboost_recommendations,
-            "mlp_score": mlp_score,
-            "mlp_category": mlp_category,
-            "mlp_recommendations": mlp_recommendations,
-            "face_image_path": face_image_path,
-            "jewelry_image_path": jewelry_image_path,
+            "prediction1": prediction_data["prediction1"],
+            "prediction2": prediction_data["prediction2"],
+            "face_image_path": prediction_data["face_image_path"],
+            "jewelry_image_path": prediction_data["jewelry_image_path"],
             "timestamp": datetime.utcnow().isoformat()
         }
         result = collection.insert_one(prediction)
@@ -90,6 +86,10 @@ def get_prediction_by_id(prediction_id, user_id):
             logger.warning(f"Prediction with ID {prediction_id} not found for user {user_id}")
             return {"error": "Prediction not found"}
 
+        # Ensure prediction1 and prediction2 exist with default values
+        prediction["prediction1"] = prediction.get("prediction1", {})
+        prediction["prediction2"] = prediction.get("prediction2", {})
+
         # Fetch individual recommendation feedback
         recommendation_reviews = list(reviews_collection.find({
             "prediction_id": ObjectId(prediction_id),
@@ -114,10 +114,14 @@ def get_prediction_by_id(prediction_id, user_id):
             if model_type in overall_feedback:
                 overall_feedback[model_type] = review["score"]
 
+        # Default to 0.5 if no feedback or invalid feedback
+        overall_feedback["prediction1"] = float(overall_feedback["prediction1"]) if overall_feedback["prediction1"] is not None else 0.5
+        overall_feedback["prediction2"] = float(overall_feedback["prediction2"]) if overall_feedback["prediction2"] is not None else 0.5
+
         # Determine liked recommendations
         liked = {"prediction1": [], "prediction2": []}
-        for model_type, rec_field in [("prediction1", "xgboost_recommendations"), ("prediction2", "mlp_recommendations")]:
-            model_recs = prediction.get(rec_field, [])
+        for model_type, rec_field in [("prediction1", "prediction1"), ("prediction2", "prediction2")]:
+            model_recs = prediction[model_type].get("recommendations", [])
             model_individual_feedback = individual_feedback[model_type]
             model_overall_feedback = overall_feedback[model_type]
 
@@ -126,31 +130,31 @@ def get_prediction_by_id(prediction_id, user_id):
                 if rec_name in model_individual_feedback:
                     if model_individual_feedback[rec_name] >= 0.75:
                         liked[model_type].append(rec_name)
-                elif model_overall_feedback is not None and model_overall_feedback >= 0.75:
+                elif model_overall_feedback >= 0.75:
                     liked[model_type].append(rec_name)
 
         # Add liked status to recommendations
-        for model_type, rec_field in [("prediction1", "xgboost_recommendations"), ("prediction2", "mlp_recommendations")]:
-            if rec_field in prediction:
-                for rec in prediction[rec_field]:
+        for model_type in ["prediction1", "prediction2"]:
+            if model_type in prediction and "recommendations" in prediction[model_type]:
+                for rec in prediction[model_type]["recommendations"]:
                     rec["liked"] = rec["name"] in liked[model_type]
 
         result = {
             "id": str(prediction["_id"]),
             "user_id": str(prediction["user_id"]),
             "prediction1": {
-                "score": prediction["xgboost_score"],
-                "category": prediction["xgboost_category"],
-                "recommendations": prediction["xgboost_recommendations"],
-                "overall_feedback": overall_feedback["prediction1"] if overall_feedback["prediction1"] is not None else "Not Provided",
-                "feedback_required": "Overall feedback for prediction1 is required" if overall_feedback["prediction1"] is None else None
+                "score": prediction["prediction1"].get("score", 0.0),
+                "category": prediction["prediction1"].get("category", "Neutral"),
+                "recommendations": prediction["prediction1"].get("recommendations", []),
+                "overall_feedback": overall_feedback["prediction1"],
+                "feedback_required": prediction["prediction1"].get("feedback_required", True)
             },
             "prediction2": {
-                "score": prediction["mlp_score"],
-                "category": prediction["mlp_category"],
-                "recommendations": prediction["mlp_recommendations"],
-                "overall_feedback": overall_feedback["prediction2"] if overall_feedback["prediction2"] is not None else "Not Provided",
-                "feedback_required": "Overall feedback for prediction2 is required" if overall_feedback["prediction2"] is None else None
+                "score": prediction["prediction2"].get("score", 0.0),
+                "category": prediction["prediction2"].get("category", "Neutral"),
+                "recommendations": prediction["prediction2"].get("recommendations", []),
+                "overall_feedback": overall_feedback["prediction2"],
+                "feedback_required": prediction["prediction2"].get("feedback_required", True)
             },
             "face_image_path": prediction.get("face_image_path"),
             "jewelry_image_path": prediction.get("jewelry_image_path"),
