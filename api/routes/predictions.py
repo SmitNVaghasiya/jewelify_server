@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 import os
 from dotenv import load_dotenv
-from .auth import get_current_user
+from .auth import get_current_user  # Assuming this is in your project structure
 from services.predictor import JewelryPredictor
 
 # Load environment variables from .env file
@@ -26,8 +26,12 @@ client = AsyncIOMotorClient(mongo_uri)
 db = client["jewelry_db"]
 predictions_collection: Collection = db["predictions"]
 
-# Initialize predictor
-predictor = JewelryPredictor()
+# Initialize predictor globally
+try:
+    predictor = JewelryPredictor()
+except Exception as e:
+    logger.error(f"Failed to initialize JewelryPredictor: {str(e)}")
+    predictor = None
 
 async def save_prediction_to_db(prediction_data: dict, user_id: str) -> str:
     logger.info("Saving prediction to database...")
@@ -46,6 +50,14 @@ async def predict(
     jewelry_image_path: str = Form(...),
     user: dict = Depends(get_current_user),
 ):
+    global predictor
+    if predictor is None:
+        try:
+            predictor = JewelryPredictor()
+        except Exception as e:
+            logger.error(f"Failed to reinitialize predictor: {str(e)}")
+            raise HTTPException(status_code=500, detail="Predictor initialization failed")
+
     logger.info("Received prediction request...")
     start_time = datetime.now()
     try:

@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import tensorflow as tf
 import xgboost as xgb
-import pickle
 import logging
 import os
 from typing import List, Tuple, Optional
@@ -23,7 +22,6 @@ class JewelryPredictor:
         
         # Load Haar Cascade file
         cascade_path = os.getenv("HAAR_CASCADE_PATH", "haarcascade_frontalface_default.xml")
-        # Face cascade loading logic remains unchanged but without root_dir
         if not os.path.exists(cascade_path):
             logger.warning(f"Haar Cascade file not found at {cascade_path}. Face validation will be skipped.")
             self.face_cascade = None
@@ -48,57 +46,48 @@ class JewelryPredictor:
             logger.error(f"Error loading MobileNetV2 model: {str(e)}")
             raise RuntimeError(f"Failed to load MobileNetV2 model: {str(e)}")
 
-        # Load XGBoost and MLP models
-        self.xgboost_model = self.load_xgboost_model()
-        self.mlp_model = self.load_mlp_model()
-        self.jewelry_categories = ["Earring", "Necklace", "Bracelet", "Ring", "Not Assigned"]
-        self.pairwise_features = self.load_pairwise_features()
-
-    def load_xgboost_model(self) -> xgb.Booster:
-        """Load the XGBoost model using the native XGBoost method."""
+        # Load XGBoost model directly
         try:
             logger.info("Loading XGBoost model...")
             start_time = time.time()
-            model_path = os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model")
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"XGBoost model file not found at {model_path}")
-            
-            # Use XGBoost's native load_model method
-            model = xgb.Booster()
-            model.load_model(model_path)
+            xgboost_model_path = os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model")
+            if not os.path.exists(xgboost_model_path):
+                raise FileNotFoundError(f"XGBoost model file not found at {xgboost_model_path}")
+            self.xgboost_model = xgb.Booster()
+            self.xgboost_model.load_model(xgboost_model_path)
             logger.info(f"XGBoost model loaded in {time.time() - start_time:.2f} seconds")
-            return model
         except Exception as e:
             logger.error(f"Error loading XGBoost model: {str(e)}. Ensure the model file is valid and saved with xgb.Booster.save_model().")
             raise RuntimeError(f"Failed to load XGBoost model: {str(e)}")
 
-    def load_mlp_model(self) -> Optional[tf.keras.Model]:
+        # Load MLP model directly
         try:
             logger.info("Loading MLP model...")
             start_time = time.time()
-            model_path = os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras")
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"MLP model file not found at {model_path}")
-            model = tf.keras.models.load_model(model_path)
+            mlp_model_path = os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras")
+            if not os.path.exists(mlp_model_path):
+                raise FileNotFoundError(f"MLP model file not found at {mlp_model_path}")
+            self.mlp_model = tf.keras.models.load_model(mlp_model_path)
             logger.info(f"MLP model loaded in {time.time() - start_time:.2f} seconds")
-            return model
         except Exception as e:
             logger.error(f"Error loading MLP model: {str(e)}")
             raise RuntimeError(f"Failed to load MLP model: {str(e)}")
 
-    def load_pairwise_features(self) -> np.ndarray:
+        # Load pairwise features directly (with allow_pickle=True)
         try:
             logger.info("Loading pairwise features...")
             start_time = time.time()
             pairwise_features_path = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
             if not os.path.exists(pairwise_features_path):
                 raise FileNotFoundError(f"Pairwise features file not found at {pairwise_features_path}")
-            features = np.load(pairwise_features_path)
+            # Use allow_pickle=True to handle object arrays, similar to old code
+            self.pairwise_features = np.load(pairwise_features_path, allow_pickle=True).item()
             logger.info(f"Pairwise features loaded in {time.time() - start_time:.2f} seconds")
-            return features
         except Exception as e:
             logger.error(f"Error loading pairwise features: {str(e)}")
             raise RuntimeError(f"Failed to load pairwise features: {str(e)}")
+
+        self.jewelry_categories = ["Earring", "Necklace", "Bracelet", "Ring", "Not Assigned"]
 
     def preprocess_image(self, image: np.ndarray) -> np.ndarray:
         logger.debug("Preprocessing image...")
@@ -116,14 +105,11 @@ class JewelryPredictor:
         if image is None or image.size == 0:
             logger.warning("Validation failed: Image is empty")
             return False, "Image is empty"
-
-        # Check if the image is blank
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         std_dev = np.std(gray)
         if std_dev < 10:
             logger.warning("Validation failed: Image is blank")
             return False, "Image is blank"
-
         logger.info(f"Image validated in {time.time() - start_time:.2f} seconds")
         return True, "Valid"
 
@@ -191,15 +177,27 @@ class JewelryPredictor:
         recommendations = []
         try:
             if self.pairwise_features is not None and len(self.pairwise_features) > 0:
-                distances = np.linalg.norm(self.pairwise_features - features, axis=1)
-                top_k_indices = np.argsort(distances)[:top_k]
-                for idx in top_k_indices:
-                    category_idx = int(distances[idx] % len(self.jewelry_categories))
-                    recommendations.append({
-                        "name": f"{self.jewelry_categories[category_idx]}_{idx}",
-                        "category": self.jewelry_categories[category_idx],
-                        "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{idx}.jpg",
-                    })
+                # Assuming pairwise_features is a dict; adjust if it's an array
+                if isinstance(self.pairwise_features, dict):
+                    distances = {key: np.linalg.norm(val - features) for key, val in self.pairwise_features.items()}
+                    sorted_items = sorted(distances.items(), key=lambda x: x[1])[:top_k]
+                    for name, _ in sorted_items:
+                        category_idx = self.jewelry_categories.index(name.split('_')[0]) if '_' in name else 0
+                        recommendations.append({
+                            "name": name,
+                            "category": self.jewelry_categories[category_idx],
+                            "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{name.split('_')[-1]}.jpg",
+                        })
+                else:
+                    distances = np.linalg.norm(self.pairwise_features - features, axis=1)
+                    top_k_indices = np.argsort(distances)[:top_k]
+                    for idx in top_k_indices:
+                        category_idx = int(distances[idx] % len(self.jewelry_categories))
+                        recommendations.append({
+                            "name": f"{self.jewelry_categories[category_idx]}_{idx}",
+                            "category": self.jewelry_categories[category_idx],
+                            "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{idx}.jpg",
+                        })
             else:
                 logger.warning("No pairwise features available, returning empty recommendations.")
         except Exception as e:
@@ -219,15 +217,27 @@ class JewelryPredictor:
         recommendations = []
         try:
             if self.pairwise_features is not None and len(self.pairwise_features) > 0:
-                distances = np.linalg.norm(self.pairwise_features - features, axis=1)
-                top_k_indices = np.argsort(distances)[:top_k]
-                for idx in top_k_indices:
-                    category_idx = int(distances[idx] % len(self.jewelry_categories))
-                    recommendations.append({
-                        "name": f"{self.jewelry_categories[category_idx]}_{idx}",
-                        "category": self.jewelry_categories[category_idx],
-                        "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{idx}.jpg",
-                    })
+                # Assuming pairwise_features is a dict; adjust if it's an array
+                if isinstance(self.pairwise_features, dict):
+                    distances = {key: np.linalg.norm(val - features) for key, val in self.pairwise_features.items()}
+                    sorted_items = sorted(distances.items(), key=lambda x: x[1])[:top_k]
+                    for name, _ in sorted_items:
+                        category_idx = self.jewelry_categories.index(name.split('_')[0]) if '_' in name else 0
+                        recommendations.append({
+                            "name": name,
+                            "category": self.jewelry_categories[category_idx],
+                            "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{name.split('_')[-1]}.jpg",
+                        })
+                else:
+                    distances = np.linalg.norm(self.pairwise_features - features, axis=1)
+                    top_k_indices = np.argsort(distances)[:top_k]
+                    for idx in top_k_indices:
+                        category_idx = int(distances[idx] % len(self.jewelry_categories))
+                        recommendations.append({
+                            "name": f"{self.jewelry_categories[category_idx]}_{idx}",
+                            "category": self.jewelry_categories[category_idx],
+                            "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{idx}.jpg",
+                        })
             else:
                 logger.warning("No pairwise features available, returning empty recommendations.")
         except Exception as e:
