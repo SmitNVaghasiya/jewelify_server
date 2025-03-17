@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 KEEP_ALIVE_URL = "https://api.publicapis.org/health"
 
 async def keep_alive_task(app: FastAPI):
-    """Background task to ping a URL every 13 minutes to keep the Render instance alive."""
+    """Background task to ping a URL every 14 minutes to keep the Render instance alive."""
     while True:
         try:
             async with aiohttp.ClientSession() as session:

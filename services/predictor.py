@@ -22,16 +22,15 @@ class JewelryPredictor:
         self.device = device
         
         # Load Haar Cascade file
-        root_dir = os.path.dirname(os.path.dirname(__file__))  # Go up one level from services/ to root
         cascade_path = os.getenv("HAAR_CASCADE_PATH", "haarcascade_frontalface_default.xml")
-        cascade_full_path = os.path.join(root_dir, cascade_path)
-        if not os.path.exists(cascade_full_path):
-            logger.warning(f"Haar Cascade file not found at {cascade_full_path}. Face validation will be skipped.")
+        # Face cascade loading logic remains unchanged but without root_dir
+        if not os.path.exists(cascade_path):
+            logger.warning(f"Haar Cascade file not found at {cascade_path}. Face validation will be skipped.")
             self.face_cascade = None
         else:
-            self.face_cascade = cv2.CascadeClassifier(cascade_full_path)
+            self.face_cascade = cv2.CascadeClassifier(cascade_path)
             if self.face_cascade.empty():
-                logger.warning(f"Failed to load Haar Cascade file at {cascade_full_path}. Face validation will be skipped.")
+                logger.warning(f"Failed to load Haar Cascade file at {cascade_path}. Face validation will be skipped.")
                 self.face_cascade = None
             else:
                 logger.info("Haar Cascade loaded successfully")
@@ -60,15 +59,13 @@ class JewelryPredictor:
         try:
             logger.info("Loading XGBoost model...")
             start_time = time.time()
-            root_dir = os.path.dirname(os.path.dirname(__file__))
             model_path = os.getenv("XGBOOST_MODEL_PATH", "xgboost_jewelry_v1.model")
-            model_full_path = os.path.join(root_dir, model_path)
-            if not os.path.exists(model_full_path):
-                raise FileNotFoundError(f"XGBoost model file not found at {model_full_path}")
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"XGBoost model file not found at {model_path}")
             
             # Use XGBoost's native load_model method
             model = xgb.Booster()
-            model.load_model(model_full_path)
+            model.load_model(model_path)
             logger.info(f"XGBoost model loaded in {time.time() - start_time:.2f} seconds")
             return model
         except Exception as e:
@@ -79,12 +76,10 @@ class JewelryPredictor:
         try:
             logger.info("Loading MLP model...")
             start_time = time.time()
-            root_dir = os.path.dirname(os.path.dirname(__file__))
             model_path = os.getenv("MLP_MODEL_PATH", "mlp_jewelry_v1.keras")
-            model_full_path = os.path.join(root_dir, model_path)
-            if not os.path.exists(model_full_path):
-                raise FileNotFoundError(f"MLP model file not found at {model_full_path}")
-            model = tf.keras.models.load_model(model_full_path)
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"MLP model file not found at {model_path}")
+            model = tf.keras.models.load_model(model_path)
             logger.info(f"MLP model loaded in {time.time() - start_time:.2f} seconds")
             return model
         except Exception as e:
@@ -95,12 +90,10 @@ class JewelryPredictor:
         try:
             logger.info("Loading pairwise features...")
             start_time = time.time()
-            root_dir = os.path.dirname(os.path.dirname(__file__))
-            features_path = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
-            features_full_path = os.path.join(root_dir, features_path)
-            if not os.path.exists(features_full_path):
-                raise FileNotFoundError(f"Pairwise features file not found at {features_full_path}")
-            features = np.load(features_full_path)
+            pairwise_features_path = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
+            if not os.path.exists(pairwise_features_path):
+                raise FileNotFoundError(f"Pairwise features file not found at {pairwise_features_path}")
+            features = np.load(pairwise_features_path)
             logger.info(f"Pairwise features loaded in {time.time() - start_time:.2f} seconds")
             return features
         except Exception as e:
