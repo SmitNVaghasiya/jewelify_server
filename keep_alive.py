@@ -1,27 +1,24 @@
+# This file is important as render server goes into sleep mode after 15 minutes and it will take around 50 seconds to restart
+
 import asyncio
 import aiohttp
 import logging
-import os
 from fastapi import FastAPI
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Reliable public API to ping (httpbin.org is a testing service that returns 200 for GET requests)
-KEEP_ALIVE_URL = os.getenv("KEEP_ALIVE_URL", "https://httpbin.org/get")
+KEEP_ALIVE_URL =  "https://httpbin.org/get"
 # Interval for keep-alive pings (default to 14 minutes, configurable via env)
-KEEP_ALIVE_INTERVAL = int(os.getenv("KEEP_ALIVE_INTERVAL", 840))  # 14 minutes = 840 seconds
+KEEP_ALIVE_INTERVAL =  840 # 14 minutes = 840 seconds
 # Number of retries for failed pings
-RETRY_ATTEMPTS = int(os.getenv("KEEP_ALIVE_RETRIES", 3))
+RETRY_ATTEMPTS =  3
 # Delay between retries
-RETRY_DELAY = int(os.getenv("KEEP_ALIVE_RETRY_DELAY", 30))  # 30 seconds
+RETRY_DELAY =  30  # 30 seconds
 # Timeout for HTTP requests
-REQUEST_TIMEOUT = int(os.getenv("KEEP_ALIVE_TIMEOUT", 10))  # 10 seconds
+REQUEST_TIMEOUT =  10  # 10 seconds
 
 async def keep_alive_task(app: FastAPI):
     """Background task to ping a URL periodically to keep the Render instance alive."""
