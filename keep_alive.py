@@ -1,31 +1,84 @@
 import asyncio
 import aiohttp
 import logging
+import os
 from fastapi import FastAPI
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Free API to ping (e.g., public API health check)
-KEEP_ALIVE_URL = "https://api.publicapis.org/health"
+# Reliable public API to ping (httpbin.org is a testing service that returns 200 for GET requests)
+KEEP_ALIVE_URL = os.getenv("KEEP_ALIVE_URL", "https://httpbin.org/get")
+# Interval for keep-alive pings (default to 14 minutes, configurable via env)
+KEEP_ALIVE_INTERVAL = int(os.getenv("KEEP_ALIVE_INTERVAL", 840))  # 14 minutes = 840 seconds
+# Number of retries for failed pings
+RETRY_ATTEMPTS = int(os.getenv("KEEP_ALIVE_RETRIES", 3))
+# Delay between retries
+RETRY_DELAY = int(os.getenv("KEEP_ALIVE_RETRY_DELAY", 30))  # 30 seconds
+# Timeout for HTTP requests
+REQUEST_TIMEOUT = int(os.getenv("KEEP_ALIVE_TIMEOUT", 10))  # 10 seconds
 
 async def keep_alive_task(app: FastAPI):
-    """Background task to ping a URL every 14 minutes to keep the Render instance alive."""
+    """Background task to ping a URL periodically to keep the Render instance alive."""
     while True:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(KEEP_ALIVE_URL) as response:
-                    if response.status == 200:
-                        logger.info("Keep-alive ping successful")
-                    else:
-                        logger.warning(f"Keep-alive ping failed with status: {response.status}")
-        except Exception as e:
-            logger.error(f"Error in keep-alive ping: {e}")
-        # Wait for 14 minutes (850 seconds)
-        await asyncio.sleep(850)
+        attempt = 0
+        success = False
+        while attempt < RETRY_ATTEMPTS and not success:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    # Set a timeout for the HTTP request
+                    timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
+                    async with session.get(KEEP_ALIVE_URL, timeout=timeout) as response:
+                        if response.status == 200:
+                            logger.info(f"Keep-alive ping successful to {KEEP_ALIVE_URL}")
+                            success = True
+                        else:
+                            logger.warning(
+                                f"Keep-alive ping failed with status: {response.status} (Attempt {attempt + 1}/{RETRY_ATTEMPTS})"
+                            )
+                            attempt += 1
+                            if attempt < RETRY_ATTEMPTS:
+                                logger.info(f"Retrying in {RETRY_DELAY} seconds...")
+                                await asyncio.sleep(RETRY_DELAY)
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"Keep-alive ping timed out after {REQUEST_TIMEOUT} seconds (Attempt {attempt + 1}/{RETRY_ATTEMPTS})"
+                )
+                attempt += 1
+                if attempt < RETRY_ATTEMPTS:
+                    logger.info(f"Retrying in {RETRY_DELAY} seconds...")
+                    await asyncio.sleep(RETRY_DELAY)
+            except Exception as e:
+                logger.error(
+                    f"Error in keep-alive ping: {e} (Attempt {attempt + 1}/{RETRY_ATTEMPTS})"
+                )
+                attempt += 1
+                if attempt < RETRY_ATTEMPTS:
+                    logger.info(f"Retrying in {RETRY_DELAY} seconds...")
+                    await asyncio.sleep(RETRY_DELAY)
+
+        if not success:
+            logger.error(
+                f"Keep-alive ping failed after {RETRY_ATTEMPTS} attempts. Will retry after {KEEP_ALIVE_INTERVAL} seconds."
+            )
+
+        # Wait for the configured interval before the next ping
+        await asyncio.sleep(KEEP_ALIVE_INTERVAL)
 
 def start_keep_alive(app: FastAPI):
     """Start the keep-alive task."""
-    loop = asyncio.get_event_loop()
-    loop.create_task(keep_alive_task(app))
+    try:
+        loop = asyncio.get_event_loop()
+        # Ensure the loop is running
+        if loop.is_running():
+            loop.create_task(keep_alive_task(app))
+        else:
+            loop.run_until_complete(keep_alive_task(app))
+        logger.info("Keep-alive task started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start keep-alive task: {e}")
