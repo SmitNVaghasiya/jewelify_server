@@ -26,7 +26,7 @@ async def home():
     return {"Message": "Welcome to Jewelify home page"}
 
 # Start keep-alive task on startup
-@app.lifespan("startup")
+@app.on_event("startup")
 async def startup_event():
     start_keep_alive(app)
 
