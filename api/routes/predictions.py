@@ -21,7 +21,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # MongoDB client setup
-mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+mongo_uri = os.getenv("MONGO_URI")
+if not mongo_uri:
+    logger.error("MONGO_URI not set in environment variables")
+    raise ValueError("MONGO_URI is required")
+
+client = None
 try:
     client = AsyncIOMotorClient(mongo_uri)
     # Test connection
@@ -29,10 +34,9 @@ try:
     logger.info("Successfully connected to MongoDB")
 except Exception as e:
     logger.error(f"Failed to connect to MongoDB: {str(e)}")
-    client = None
 
-db = client["jewelry_db"] if client else None
-predictions_collection: Collection = db["predictions"] if db else None
+db = client["jewelry_db"] if client is not None else None
+predictions_collection = db["predictions"] if db is not None else None
 
 # Initialize predictor globally
 predictor = None
@@ -43,7 +47,7 @@ except Exception as e:
     logger.error(f"Failed to initialize JewelryPredictor: {str(e)}")
 
 async def save_prediction_to_db(prediction_data: dict, user_id: str) -> str:
-    if not predictions_collection:
+    if predictions_collection is None:
         logger.error("Database connection not available")
         raise HTTPException(status_code=500, detail="Database connection unavailable")
     
@@ -51,7 +55,7 @@ async def save_prediction_to_db(prediction_data: dict, user_id: str) -> str:
     start_time = datetime.now()
     try:
         prediction_data["user_id"] = user_id
-        prediction_data["timestamp"] = datetime.now().isoformat()  # Use ISO format for consistency
+        prediction_data["timestamp"] = datetime.now().isoformat()
         result = await predictions_collection.insert_one(prediction_data)
         logger.info(f"Prediction saved to database in {(datetime.now() - start_time).total_seconds():.2f} seconds")
         return str(result.inserted_id)
@@ -137,7 +141,7 @@ async def predict(
 
 @router.get("/get_prediction/{prediction_id}")
 async def get_prediction(prediction_id: str, user: dict = Depends(get_current_user)):
-    if not predictions_collection:
+    if predictions_collection is None:
         logger.error("Database connection not available")
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
@@ -179,7 +183,7 @@ async def submit_feedback(
     score: str = Form(...),
     user: dict = Depends(get_current_user),
 ):
-    if not predictions_collection:
+    if predictions_collection is None:
         logger.error("Database connection not available")
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 

@@ -9,7 +9,7 @@ nest_asyncio==1.6.0
 python-dotenv==1.0.1
 pydantic==2.10.6
 scikit-learn==1.5.2
-pymongo[srv]==4.11.1
+pymongo==4.11.1
 passlib[bcrypt]==1.7.4
 python-jose[cryptography]==3.3.0  # Updated to include cryptography backend
 pyyaml==6.0.1
