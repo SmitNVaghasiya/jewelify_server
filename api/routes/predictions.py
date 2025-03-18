@@ -20,27 +20,44 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# MongoDB client
+# MongoDB client setup
 mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-client = AsyncIOMotorClient(mongo_uri)
-db = client["jewelry_db"]
-predictions_collection: Collection = db["predictions"]
+try:
+    client = AsyncIOMotorClient(mongo_uri)
+    # Test connection
+    client.admin.command('ping')
+    logger.info("Successfully connected to MongoDB")
+except Exception as e:
+    logger.error(f"Failed to connect to MongoDB: {str(e)}")
+    client = None
+
+db = client["jewelry_db"] if client else None
+predictions_collection: Collection = db["predictions"] if db else None
 
 # Initialize predictor globally
+predictor = None
 try:
     predictor = JewelryPredictor()
+    logger.info("JewelryPredictor initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize JewelryPredictor: {str(e)}")
-    predictor = None
 
 async def save_prediction_to_db(prediction_data: dict, user_id: str) -> str:
-    logger.info("Saving prediction to database...")
+    if not predictions_collection:
+        logger.error("Database connection not available")
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    
+    logger.info(f"Saving prediction to database for user {user_id}...")
     start_time = datetime.now()
-    prediction_data["user_id"] = user_id
-    prediction_data["timestamp"] = datetime.now()
-    result = await predictions_collection.insert_one(prediction_data)
-    logger.info(f"Prediction saved to database in {(datetime.now() - start_time).total_seconds():.2f} seconds")
-    return str(result.inserted_id)
+    try:
+        prediction_data["user_id"] = user_id
+        prediction_data["timestamp"] = datetime.now().isoformat()  # Use ISO format for consistency
+        result = await predictions_collection.insert_one(prediction_data)
+        logger.info(f"Prediction saved to database in {(datetime.now() - start_time).total_seconds():.2f} seconds")
+        return str(result.inserted_id)
+    except Exception as e:
+        logger.error(f"Failed to save prediction to database: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.post("/predict")
 async def predict(
@@ -54,14 +71,15 @@ async def predict(
     if predictor is None:
         try:
             predictor = JewelryPredictor()
+            logger.info("JewelryPredictor reinitialized successfully")
         except Exception as e:
-            logger.error(f"Failed to reinitialize predictor: {str(e)}")
+            logger.error(f"Failed to reinitialize JewelryPredictor: {str(e)}")
             raise HTTPException(status_code=500, detail="Predictor initialization failed")
 
-    logger.info("Received prediction request...")
+    logger.info(f"Received prediction request for user {user['sub']}...")
     start_time = datetime.now()
     try:
-        # Read and decode images (no MIME type validation)
+        # Read and decode images
         face_contents = await face.read()
         jewelry_contents = await jewelry.read()
 
@@ -96,10 +114,19 @@ async def predict(
 
         # Save to database
         prediction_id = await save_prediction_to_db(prediction_result, user["sub"])
+        if not prediction_id:
+            logger.error("Failed to save prediction to database")
+            raise HTTPException(status_code=500, detail="Failed to save prediction")
+
         prediction_result["prediction_id"] = prediction_id
 
         logger.info(f"Prediction request completed in {(datetime.now() - start_time).total_seconds():.2f} seconds")
-        return prediction_result
+        return {
+            "status": "success",
+            "prediction_id": prediction_id,
+            "message": "Prediction completed and saved successfully",
+            "details": prediction_result
+        }
 
     except HTTPException as e:
         logger.error(f"HTTP error during prediction: {str(e)}")
@@ -110,7 +137,11 @@ async def predict(
 
 @router.get("/get_prediction/{prediction_id}")
 async def get_prediction(prediction_id: str, user: dict = Depends(get_current_user)):
-    logger.info(f"Fetching prediction {prediction_id}...")
+    if not predictions_collection:
+        logger.error("Database connection not available")
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    logger.info(f"Fetching prediction {prediction_id} for user {user['sub']}...")
     start_time = datetime.now()
     try:
         prediction = await predictions_collection.find_one({"_id": prediction_id, "user_id": user["sub"]})
@@ -125,8 +156,12 @@ async def get_prediction(prediction_id: str, user: dict = Depends(get_current_us
         overall_feedback1 = prediction["prediction1"].get("overall_feedback")
         overall_feedback2 = prediction["prediction2"].get("overall_feedback")
         
-        prediction["prediction1"]["overall_feedback"] = float(overall_feedback1) if overall_feedback1 is not None and overall_feedback1 != "Not Provided" else 0.5
-        prediction["prediction2"]["overall_feedback"] = float(overall_feedback2) if overall_feedback2 is not None and overall_feedback2 != "Not Provided" else 0.5
+        prediction["prediction1"]["overall_feedback"] = (
+            float(overall_feedback1) if overall_feedback1 is not None and overall_feedback1 != "Not Provided" else 0.5
+        )
+        prediction["prediction2"]["overall_feedback"] = (
+            float(overall_feedback2) if overall_feedback2 is not None and overall_feedback2 != "Not Provided" else 0.5
+        )
 
         prediction["prediction_id"] = prediction_id
         logger.info(f"Prediction {prediction_id} fetched in {(datetime.now() - start_time).total_seconds():.2f} seconds")
@@ -144,7 +179,11 @@ async def submit_feedback(
     score: str = Form(...),
     user: dict = Depends(get_current_user),
 ):
-    logger.info(f"Submitting feedback for prediction {prediction_id}...")
+    if not predictions_collection:
+        logger.error("Database connection not available")
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    logger.info(f"Submitting feedback for prediction {prediction_id} for user {user['sub']}...")
     start_time = datetime.now()
     try:
         prediction = await predictions_collection.find_one({"_id": prediction_id, "user_id": user["sub"]})
@@ -154,18 +193,35 @@ async def submit_feedback(
 
         update_data = {}
         if feedback_type == "prediction":
-            update_data[f"{model_type}.overall_feedback"] = float(score)  # Convert score to float
-            update_data[f"{model_type}.feedback_required"] = False
+            try:
+                score_float = float(score)
+                if not 0 <= score_float <= 1:
+                    raise ValueError("Score must be between 0 and 1")
+                update_data[f"{model_type}.overall_feedback"] = score_float
+                update_data[f"{model_type}.feedback_required"] = False
+            except ValueError as e:
+                logger.warning(f"Invalid score value: {score}")
+                raise HTTPException(status_code=400, detail=f"Invalid score: {str(e)}")
         elif feedback_type == "recommendation":
             if not recommendation_name:
                 logger.warning("Recommendation name missing for feedback")
                 raise HTTPException(status_code=400, detail="Recommendation name is required")
-            recommendations = prediction[model_type]["recommendations"]
-            for rec in recommendations:
-                if rec["name"] == recommendation_name:
-                    rec["feedback"] = float(score)  # Convert score to float
-                    break
-            update_data[f"{model_type}.recommendations"] = recommendations
+            try:
+                score_float = float(score)
+                if not 0 <= score_float <= 1:
+                    raise ValueError("Score must be between 0 and 1")
+                recommendations = prediction[model_type]["recommendations"]
+                for rec in recommendations:
+                    if rec["name"] == recommendation_name:
+                        rec["feedback"] = score_float
+                        break
+                else:
+                    logger.warning(f"Recommendation {recommendation_name} not found in {model_type}")
+                    raise HTTPException(status_code=400, detail="Recommendation not found")
+                update_data[f"{model_type}.recommendations"] = recommendations
+            except ValueError as e:
+                logger.warning(f"Invalid score value: {score}")
+                raise HTTPException(status_code=400, detail=f"Invalid score: {str(e)}")
         else:
             logger.warning(f"Invalid feedback type: {feedback_type}")
             raise HTTPException(status_code=400, detail="Invalid feedback type")
