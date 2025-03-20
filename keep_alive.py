@@ -1,5 +1,4 @@
-# This file is important as render server goes into sleep mode after 15 minutes and it will take around 50 seconds to restart
-
+# keep_alive.py
 import asyncio
 import aiohttp
 import logging
@@ -9,16 +8,17 @@ from fastapi import FastAPI
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Reliable public API to ping (httpbin.org is a testing service that returns 200 for GET requests)
-KEEP_ALIVE_URL =  "https://httpbin.org/get"
-# Interval for keep-alive pings (default to 14 minutes, configurable via env)
-KEEP_ALIVE_INTERVAL =  840 # 14 minutes = 840 seconds
+# Use the app's own health check endpoint to keep the server alive
+# Replace with your Render URL or use an environment variable
+KEEP_ALIVE_URL = "http://localhost:8000/health"
+# Interval for keep-alive pings (14 minutes = 840 seconds)
+KEEP_ALIVE_INTERVAL = 840
 # Number of retries for failed pings
-RETRY_ATTEMPTS =  3
+RETRY_ATTEMPTS = 3
 # Delay between retries
-RETRY_DELAY =  30  # 30 seconds
+RETRY_DELAY = 30  # 30 seconds
 # Timeout for HTTP requests
-REQUEST_TIMEOUT =  10  # 10 seconds
+REQUEST_TIMEOUT = 10  # 10 seconds
 
 async def keep_alive_task(app: FastAPI):
     """Background task to ping a URL periodically to keep the Render instance alive."""
@@ -60,9 +60,10 @@ async def keep_alive_task(app: FastAPI):
                     await asyncio.sleep(RETRY_DELAY)
 
         if not success:
-            logger.error(
-                f"Keep-alive ping failed after {RETRY_ATTEMPTS} attempts. Will retry after {KEEP_ALIVE_INTERVAL} seconds."
+            logger.critical(
+                f"Keep-alive ping failed after {RETRY_ATTEMPTS} attempts. This may indicate a network or server issue. Will retry after {KEEP_ALIVE_INTERVAL} seconds."
             )
+            # Optionally, add a notification mechanism here (e.g., send an email or log to a monitoring service)
 
         # Wait for the configured interval before the next ping
         await asyncio.sleep(KEEP_ALIVE_INTERVAL)

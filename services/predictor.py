@@ -1,3 +1,4 @@
+# services/predictor.py
 import cv2
 import numpy as np
 import tensorflow as tf
@@ -8,6 +9,7 @@ from typing import List, Tuple, Optional
 import asyncio
 from dotenv import load_dotenv
 import time
+from motor.motor_asyncio import AsyncIOMotorClient
 
 # Load environment variables from .env file
 load_dotenv()
@@ -15,6 +17,12 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# MongoDB client setup for updating prediction status
+mongo_uri = os.getenv("MONGO_URI")
+client = AsyncIOMotorClient(mongo_uri)
+db = client["jewelry_db"]
+predictions_collection = db["predictions"]
 
 class JewelryPredictor:
     def __init__(self, device: str = "CPU"):
@@ -57,7 +65,7 @@ class JewelryPredictor:
             self.xgboost_model.load_model(xgboost_model_path)
             logger.info(f"XGBoost model loaded in {time.time() - start_time:.2f} seconds")
         except Exception as e:
-            logger.error(f"Error loading XGBoost model: {str(e)}. Ensure the model file is valid and saved with xgb.Booster.save_model().")
+            logger.error(f"Error loading XGBoost model: {str(e)}")
             raise RuntimeError(f"Failed to load XGBoost model: {str(e)}")
 
         # Load MLP model directly
@@ -73,14 +81,13 @@ class JewelryPredictor:
             logger.error(f"Error loading MLP model: {str(e)}")
             raise RuntimeError(f"Failed to load MLP model: {str(e)}")
 
-        # Load pairwise features directly (with allow_pickle=True)
+        # Load pairwise features directly
         try:
             logger.info("Loading pairwise features...")
             start_time = time.time()
             pairwise_features_path = os.getenv("PAIRWISE_FEATURES_PATH", "pairwise_features.npy")
             if not os.path.exists(pairwise_features_path):
                 raise FileNotFoundError(f"Pairwise features file not found at {pairwise_features_path}")
-            # Use allow_pickle=True to handle object arrays
             self.pairwise_features = np.load(pairwise_features_path, allow_pickle=True).item()
             logger.info(f"Pairwise features loaded in {time.time() - start_time:.2f} seconds")
         except Exception as e:
@@ -131,6 +138,43 @@ class JewelryPredictor:
             return False, "No faces detected in the image"
         logger.info(f"Face image validated in {time.time() - start_time:.2f} seconds")
         return True, "Valid"
+
+    async def validate_images(self, face_image: np.ndarray, jewelry_image: np.ndarray, prediction_id: str):
+        logger.info(f"Validating images for prediction {prediction_id}...")
+        start_time = time.time()
+        try:
+            # Validate face image
+            is_valid_face, face_message = self.validate_face_image(face_image)
+            if not is_valid_face:
+                logger.warning(f"Face image validation failed: {face_message}")
+                await predictions_collection.update_one(
+                    {"_id": prediction_id},
+                    {"$set": {"validation_status": "failed"}}
+                )
+                return
+
+            # Validate jewelry image
+            is_valid_jewelry, jewelry_message = self.validate_image(jewelry_image)
+            if not is_valid_jewelry:
+                logger.warning(f"Jewelry image validation failed: {jewelry_message}")
+                await predictions_collection.update_one(
+                    {"_id": prediction_id},
+                    {"$set": {"validation_status": "failed"}}
+                )
+                return
+
+            # Validation successful
+            await predictions_collection.update_one(
+                {"_id": prediction_id},
+                {"$set": {"validation_status": "completed"}}
+            )
+            logger.info(f"Validation completed in {time.time() - start_time:.2f} seconds")
+        except Exception as e:
+            logger.error(f"Error during validation: {str(e)}")
+            await predictions_collection.update_one(
+                {"_id": prediction_id},
+                {"$set": {"validation_status": "failed"}}
+            )
 
     def extract_features(self, image: np.ndarray) -> np.ndarray:
         logger.info("Extracting features...")
@@ -255,52 +299,75 @@ class JewelryPredictor:
         jewelry_image: np.ndarray,
         face_image_path: str,
         jewelry_image_path: str,
+        prediction_id: str,
     ) -> dict:
-        logger.info("Starting prediction for both models...")
+        logger.info(f"Starting prediction for both models for prediction {prediction_id}...")
         start_time = time.time()
-        face_features = self.extract_features(face_image) if face_image is not None else None
-        jewelry_features = self.extract_features(jewelry_image) if jewelry_image is not None else None
-        combined_features = np.concatenate([face_features, jewelry_features]) if face_features is not None and jewelry_features is not None else None
+        try:
+            face_features = self.extract_features(face_image) if face_image is not None else None
+            jewelry_features = self.extract_features(jewelry_image) if jewelry_image is not None else None
+            combined_features = np.concatenate([face_features, jewelry_features]) if face_features is not None and jewelry_features is not None else None
 
-        tasks = [
-            self.predict_with_xgboost(combined_features) if combined_features is not None else asyncio.Future(),
-            self.predict_with_mlp(combined_features) if combined_features is not None else asyncio.Future(),
-            self.get_recommendations_with_xgboost(face_features) if face_features is not None else asyncio.Future(),
-            self.get_recommendations_with_mlp(face_features) if face_features is not None else asyncio.Future(),
-        ]
+            tasks = [
+                self.predict_with_xgboost(combined_features) if combined_features is not None else asyncio.Future(),
+                self.predict_with_mlp(combined_features) if combined_features is not None else asyncio.Future(),
+                self.get_recommendations_with_xgboost(face_features) if face_features is not None else asyncio.Future(),
+                self.get_recommendations_with_mlp(face_features) if face_features is not None else asyncio.Future(),
+            ]
 
-        for i, task in enumerate(tasks):
-            if isinstance(task, asyncio.Future):
-                tasks[i] = asyncio.Future()
-                tasks[i].set_result((50.0, "Neutral") if i < 2 else [{"name": f"fallback_{i}", "category": "Neutral", "display_url": ""} for _ in range(3)])
+            for i, task in enumerate(tasks):
+                if isinstance(task, asyncio.Future):
+                    tasks[i] = asyncio.Future()
+                    tasks[i].set_result((50.0, "Neutral") if i < 2 else [{"name": f"fallback_{i}", "category": "Neutral", "display_url": ""} for _ in range(3)])
 
-        results = await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks)
 
-        xgboost_confidence, xgboost_category = results[0]
-        mlp_confidence, mlp_category = results[1]
-        xgboost_recommendations = results[2]
-        mlp_recommendations = results[3]
+            xgboost_confidence, xgboost_category = results[0]
+            mlp_confidence, mlp_category = results[1]
+            xgboost_recommendations = results[2]
+            mlp_recommendations = results[3]
 
-        prediction_result = {
-            "prediction1": {
-                "score": float(xgboost_confidence),
-                "category": xgboost_category,
-                "recommendations": xgboost_recommendations,
-                "feedback_required": True,
-                "overall_feedback": 0.5  # Default to 0.5 if no feedback yet
-            },
-            "prediction2": {
-                "score": float(mlp_confidence),
-                "category": mlp_category,
-                "recommendations": mlp_recommendations,
-                "feedback_required": True,
-                "overall_feedback": 0.5  # Default to 0.5 if no feedback yet
-            },
-            "face_image_path": face_image_path,
-            "jewelry_image_path": jewelry_image_path,
-        }
-        logger.info(f"Prediction for both models completed in {time.time() - start_time:.2f} seconds")
-        return prediction_result
+            prediction_result = {
+                "prediction1": {
+                    "score": float(xgboost_confidence),
+                    "category": xgboost_category,
+                    "recommendations": xgboost_recommendations,
+                    "feedback_required": True,
+                    "overall_feedback": 0.5
+                },
+                "prediction2": {
+                    "score": float(mlp_confidence),
+                    "category": mlp_category,
+                    "recommendations": mlp_recommendations,
+                    "feedback_required": True,
+                    "overall_feedback": 0.5
+                },
+                "face_image_path": face_image_path,
+                "jewelry_image_path": jewelry_image_path,
+            }
+
+            # Update the database with the prediction result and status
+            await predictions_collection.update_one(
+                {"_id": prediction_id},
+                {
+                    "$set": {
+                        "prediction1": prediction_result["prediction1"],
+                        "prediction2": prediction_result["prediction2"],
+                        "face_image_path": prediction_result["face_image_path"],
+                        "jewelry_image_path": prediction_result["jewelry_image_path"],
+                        "prediction_status": "completed"
+                    }
+                }
+            )
+            logger.info(f"Prediction for both models completed in {time.time() - start_time:.2f} seconds")
+            return prediction_result
+        except Exception as e:
+            logger.error(f"Error during prediction: {str(e)}")
+            await predictions_collection.update_one(
+                {"_id": prediction_id},
+                {"$set": {"prediction_status": "failed"}}
+            )
+            raise
 
 if __name__ == "__main__":
     predictor = JewelryPredictor()
@@ -309,7 +376,7 @@ if __name__ == "__main__":
     start_time = time.time()
     loop = asyncio.get_event_loop()
     result = loop.run_until_complete(
-        predictor.predict_both(image, jewelry_image, "sample_face.jpg", "sample_jewelry.jpg")
+        predictor.predict_both(image, jewelry_image, "sample_face.jpg", "sample_jewelry.jpg", "test_id")
     )
     print(result)
     print(f"Total time: {time.time() - start_time:.2f} seconds")

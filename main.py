@@ -1,3 +1,4 @@
+# main.py
 import os
 from fastapi import FastAPI
 from dotenv import load_dotenv
@@ -24,6 +25,11 @@ app.include_router(history.router)
 @app.get('/')
 async def home():
     return {"Message": "Welcome to Jewelify home page"}
+
+# Health check endpoint for keep-alive
+@app.get('/health')
+async def health_check():
+    return {"status": "healthy"}
 
 # Start keep-alive task on startup
 @app.on_event("startup")

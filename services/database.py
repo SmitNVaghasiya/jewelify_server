@@ -1,3 +1,4 @@
+# services/database.py
 from pymongo import MongoClient
 import os
 from datetime import datetime
@@ -56,7 +57,9 @@ def save_prediction(prediction_data: dict, user_id: str):
             "prediction2": prediction_data["prediction2"],
             "face_image_path": prediction_data["face_image_path"],
             "jewelry_image_path": prediction_data["jewelry_image_path"],
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "validation_status": "pending",
+            "prediction_status": "pending"
         }
         result = collection.insert_one(prediction)
         logger.info(f"Saved prediction with ID: {result.inserted_id}")
@@ -158,7 +161,9 @@ def get_prediction_by_id(prediction_id, user_id):
             },
             "face_image_path": prediction.get("face_image_path"),
             "jewelry_image_path": prediction.get("jewelry_image_path"),
-            "timestamp": prediction["timestamp"]
+            "timestamp": prediction["timestamp"],
+            "validation_status": prediction.get("validation_status", "pending"),
+            "prediction_status": prediction.get("prediction_status", "pending")
         }
         logger.info(f"Retrieved prediction with ID: {prediction_id} for user {user_id}")
         return result
