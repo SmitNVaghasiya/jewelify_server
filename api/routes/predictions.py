@@ -20,7 +20,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/predictions", tags=["predictions"])
 
 # MongoDB client setup
 mongo_uri = os.getenv("MONGO_URI")
