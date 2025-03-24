@@ -1,4 +1,3 @@
-# api/routes/predictions.py
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from motor.motor_asyncio import AsyncIOMotorClient
 import cv2
@@ -83,7 +82,7 @@ async def predict(
             logger.error(f"Failed to reinitialize JewelryPredictor: {str(e)}")
             raise HTTPException(status_code=500, detail="Predictor initialization failed")
 
-    logger.info(f"Received prediction request for user {user['sub']}...")
+    logger.info("Received request to /predictions/predict")
     start_time = datetime.now()
     try:
         # Read and decode images
@@ -94,11 +93,13 @@ async def predict(
         if face_image is None:
             logger.warning("Failed to decode face image")
             raise HTTPException(status_code=400, detail="Invalid face image format")
+        logger.info("Face image decoded successfully")
 
         jewelry_image = cv2.imdecode(np.frombuffer(jewelry_contents, np.uint8), cv2.IMREAD_COLOR)
         if jewelry_image is None:
             logger.warning("Failed to decode jewelry image")
             raise HTTPException(status_code=400, detail="Invalid jewelry image format")
+        logger.info("Jewelry image decoded successfully")
 
         logger.info(f"Face image decoded: {face_image.shape}, Jewelry image decoded: {jewelry_image.shape}")
 
@@ -127,16 +128,18 @@ async def predict(
         if not prediction_id:
             logger.error("Failed to save prediction to database")
             raise HTTPException(status_code=500, detail="Failed to save prediction")
+        logger.info(f"Prediction ID {prediction_id} saved")
 
         # Run validation and prediction tasks concurrently
+        logger.info("Starting validation task...")
         validation_task = asyncio.create_task(
             predictor.validate_images(face_image, jewelry_image, prediction_id)
         )
+        logger.info("Starting prediction task...")
         prediction_task = asyncio.create_task(
             predictor.predict_both(face_image, jewelry_image, face_image_path, jewelry_image_path, prediction_id)
         )
-
-        # Wait for both tasks to complete
+        logger.info("Waiting for tasks to complete...")
         await asyncio.gather(validation_task, prediction_task)
 
         logger.info(f"Prediction request completed in {(datetime.now() - start_time).total_seconds():.2f} seconds")
