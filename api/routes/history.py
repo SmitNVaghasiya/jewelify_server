@@ -55,6 +55,10 @@ async def get_user_history(
             if model_type in overall_feedback:
                 overall_feedback[model_type] = review["score"]
 
+        # Default to 0.5 if no feedback
+        overall_feedback["prediction1"] = float(overall_feedback["prediction1"]) if overall_feedback["prediction1"] is not None else 0.5
+        overall_feedback["prediction2"] = float(overall_feedback["prediction2"]) if overall_feedback["prediction2"] is not None else 0.5
+
         # Process recommendations for each model
         xgboost_recs = pred.get("xgboost_recommendations", [])
         mlp_recs = pred.get("mlp_recommendations", [])
@@ -63,7 +67,7 @@ async def get_user_history(
         for rec in xgboost_recs:
             rec_name = rec["name"]
             # Default liked status based on model prediction score
-            rec["liked"] = rec["score"] >= 75.0
+            rec["liked"] = rec.get("score", 0.0) >= 75.0
             # Apply user score: individual feedback takes precedence, else use overall feedback
             if rec_name in individual_feedback["prediction1"]:
                 rec["user_score"] = individual_feedback["prediction1"][rec_name]
@@ -77,7 +81,7 @@ async def get_user_history(
         for rec in mlp_recs:
             rec_name = rec["name"]
             # Default liked status based on model prediction score
-            rec["liked"] = rec["score"] >= 75.0
+            rec["liked"] = rec.get("score", 0.0) >= 75.0
             # Apply user score: individual feedback takes precedence, else use overall feedback
             if rec_name in individual_feedback["prediction2"]:
                 rec["user_score"] = individual_feedback["prediction2"][rec_name]
@@ -89,8 +93,8 @@ async def get_user_history(
                 rec["user_score"] = None  # Will trigger feedback requirement
 
         # Sort: liked first, then by score
-        xgboost_sorted = sorted(xgboost_recs, key=lambda x: (x["liked"], x["score"]), reverse=True)
-        mlp_sorted = sorted(mlp_recs, key=lambda x: (x["liked"], x["score"]), reverse=True)
+        xgboost_sorted = sorted(xgboost_recs, key=lambda x: (x["liked"], x.get("score", 0.0)), reverse=True)
+        mlp_sorted = sorted(mlp_recs, key=lambda x: (x["liked"], x.get("score", 0.0)), reverse=True)
 
         # Enforce exactly 10 recommendations per model
         xgboost_display = xgboost_sorted[:10]
@@ -103,15 +107,15 @@ async def get_user_history(
                 "score": pred["xgboost_score"],
                 "category": pred["xgboost_category"],
                 "recommendations": xgboost_display,
-                "overall_feedback": overall_feedback["prediction1"] if overall_feedback["prediction1"] is not None else "Not Provided",
-                "feedback_required": "Overall feedback for prediction1 is required" if overall_feedback["prediction1"] is None else None
+                "overall_feedback": overall_feedback["prediction1"],
+                "feedback_required": "Overall feedback for prediction1 is required" if overall_feedback["prediction1"] == 0.5 else None
             },
             "prediction2": {
                 "score": pred["mlp_score"],
                 "category": pred["mlp_category"],
                 "recommendations": mlp_display,
-                "overall_feedback": overall_feedback["prediction2"] if overall_feedback["prediction2"] is not None else "Not Provided",
-                "feedback_required": "Overall feedback for prediction2 is required" if overall_feedback["prediction2"] is None else None
+                "overall_feedback": overall_feedback["prediction2"],
+                "feedback_required": "Overall feedback for prediction2 is required" if overall_feedback["prediction2"] == 0.5 else None
             },
             "face_image_path": pred.get("face_image_path"),
             "jewelry_image_path": pred.get("jewelry_image_path"),

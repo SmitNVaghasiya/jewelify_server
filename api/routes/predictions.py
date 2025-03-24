@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from motor.motor_asyncio import AsyncIOMotorClient
 import cv2
 import numpy as np
 from typing import Optional
@@ -7,58 +6,43 @@ from datetime import datetime
 import logging
 import os
 from dotenv import load_dotenv
-from .auth import get_current_user
+from api.dependencies import get_current_user
 from services.predictor import JewelryPredictor
-from services.database import get_db_client, save_prediction
+from services.database import get_db_client
 import asyncio
+from bson import ObjectId
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging based on environment
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+logging_level = logging.DEBUG if ENVIRONMENT == "development" else logging.WARNING
+logging.basicConfig(level=logging_level, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
-# MongoDB client setup
-mongo_uri = os.getenv("MONGO_URI")
-if not mongo_uri:
-    logger.error("MONGO_URI not set in environment variables")
-    raise ValueError("MONGO_URI is required")
+# Configurable polling settings
+POLLING_TIMEOUT_SECONDS = int(os.getenv("POLLING_TIMEOUT_SECONDS", 60))
+POLLING_INTERVAL_SECONDS = int(os.getenv("POLLING_INTERVAL_SECONDS", 5))
 
-client = None
-try:
-    client = AsyncIOMotorClient(mongo_uri)
-    client.admin.command('ping')
-    logger.info("Successfully connected to MongoDB")
-except Exception as e:
-    logger.error(f"Failed to connect to MongoDB: {str(e)}")
-
-db = client["jewelry_db"] if client is not None else None
-predictions_collection = db["predictions"] if db is not None else None
-
-# Initialize predictor globally
-predictor = None
-try:
-    predictor = JewelryPredictor()
-    logger.info("JewelryPredictor initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize JewelryPredictor: {str(e)}")
-
-async def save_prediction_to_db(prediction_data: dict, user_id: str) -> str:
-    if predictions_collection is None:
+def save_prediction_to_db(prediction_data: dict, user_id: str) -> str:
+    client = get_db_client()
+    if not client:
         logger.error("Database connection not available")
         raise HTTPException(status_code=500, detail="Database connection unavailable")
     
     logger.info(f"Saving prediction to database for user {user_id}...")
     start_time = datetime.now()
     try:
-        prediction_data["user_id"] = user_id
+        prediction_data["user_id"] = ObjectId(user_id)
         prediction_data["timestamp"] = datetime.now().isoformat()
         prediction_data["validation_status"] = "pending"
         prediction_data["prediction_status"] = "pending"
-        result = await predictions_collection.insert_one(prediction_data)
+        db = client["jewelify"]
+        predictions_collection = db["predictions"]
+        result = predictions_collection.insert_one(prediction_data)
         logger.info(f"Prediction saved to database in {(datetime.now() - start_time).total_seconds():.2f} seconds")
         return str(result.inserted_id)
     except Exception as e:
@@ -73,35 +57,43 @@ async def predict(
     jewelry_image_path: str = Form(...),
     user: dict = Depends(get_current_user),
 ):
-    global predictor
-    if predictor is None:
-        try:
-            predictor = JewelryPredictor()
-            logger.info("JewelryPredictor reinitialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to reinitialize JewelryPredictor: {str(e)}")
-            raise HTTPException(status_code=500, detail="Predictor initialization failed")
+    # Initialize predictor per request to ensure thread-safety
+    try:
+        predictor = JewelryPredictor()
+        logger.info("JewelryPredictor initialized successfully for this request")
+    except Exception as e:
+        logger.error(f"Failed to initialize JewelryPredictor: {str(e)}")
+        raise HTTPException(status_code=500, detail="Predictor initialization failed")
 
     logger.info("Received request to /predictions/predict")
     start_time = datetime.now()
     try:
+        # Check if '_id' exists in the user dictionary
+        if "_id" not in user:
+            logger.error("User dictionary missing '_id' field")
+            raise HTTPException(status_code=401, detail="Invalid token: User ID not found")
+
         # Read and decode images
         face_contents = await face.read()
         jewelry_contents = await jewelry.read()
+
+        # Reset file cursors in case the files need to be read again
+        await face.seek(0)
+        await jewelry.seek(0)
 
         face_image = cv2.imdecode(np.frombuffer(face_contents, np.uint8), cv2.IMREAD_COLOR)
         if face_image is None:
             logger.warning("Failed to decode face image")
             raise HTTPException(status_code=400, detail="Invalid face image format")
-        logger.info("Face image decoded successfully")
+        logger.debug("Face image decoded successfully")
 
         jewelry_image = cv2.imdecode(np.frombuffer(jewelry_contents, np.uint8), cv2.IMREAD_COLOR)
         if jewelry_image is None:
             logger.warning("Failed to decode jewelry image")
             raise HTTPException(status_code=400, detail="Invalid jewelry image format")
-        logger.info("Jewelry image decoded successfully")
+        logger.debug("Jewelry image decoded successfully")
 
-        logger.info(f"Face image decoded: {face_image.shape}, Jewelry image decoded: {jewelry_image.shape}")
+        logger.debug(f"Face image decoded: {face_image.shape}, Jewelry image decoded: {jewelry_image.shape}")
 
         # Initialize prediction data with default values
         prediction_data = {
@@ -124,7 +116,7 @@ async def predict(
         }
 
         # Save initial prediction data to database
-        prediction_id = await save_prediction_to_db(prediction_data, user["sub"])
+        prediction_id = save_prediction_to_db(prediction_data, str(user["_id"]))
         if not prediction_id:
             logger.error("Failed to save prediction to database")
             raise HTTPException(status_code=500, detail="Failed to save prediction")
@@ -158,15 +150,26 @@ async def predict(
 
 @router.get("/get_prediction/{prediction_id}")
 async def get_prediction(prediction_id: str, user: dict = Depends(get_current_user)):
-    if predictions_collection is None:
+    client = get_db_client()
+    if not client:
         logger.error("Database connection not available")
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
-    logger.info(f"Fetching prediction {prediction_id} for user {user['sub']}...")
+    logger.info(f"Fetching prediction {prediction_id} for user {user['_id']}...")
     start_time = datetime.now()
     try:
+        # Check if '_id' exists in the user dictionary
+        if "_id" not in user:
+            logger.error("User dictionary missing '_id' field")
+            raise HTTPException(status_code=401, detail="Invalid token: User ID not found")
+
         # Check if prediction exists
-        prediction = await predictions_collection.find_one({"_id": prediction_id, "user_id": user["sub"]})
+        db = client["jewelify"]
+        predictions_collection = db["predictions"]
+        prediction = predictions_collection.find_one({
+            "_id": ObjectId(prediction_id),
+            "user_id": ObjectId(user["_id"])
+        })
         if not prediction:
             logger.warning(f"Prediction {prediction_id} not found")
             raise HTTPException(status_code=404, detail="Prediction not found")
@@ -175,19 +178,21 @@ async def get_prediction(prediction_id: str, user: dict = Depends(get_current_us
         validation_status = prediction.get("validation_status", "pending")
         prediction_status = prediction.get("prediction_status", "pending")
 
-        # Wait for both tasks to complete (with a timeout of 60 seconds)
-        timeout = 60  # seconds
+        # Wait for both tasks to complete (with a configurable timeout)
         start_wait = datetime.now()
-        while (validation_status == "pending" or prediction_status == "pending") and (datetime.now() - start_wait).total_seconds() < timeout:
-            await asyncio.sleep(1)  # Check every second
-            prediction = await predictions_collection.find_one({"_id": prediction_id, "user_id": user["sub"]})
+        while (validation_status == "pending" or prediction_status == "pending") and (datetime.now() - start_wait).total_seconds() < POLLING_TIMEOUT_SECONDS:
+            await asyncio.sleep(POLLING_INTERVAL_SECONDS)  # Check every POLLING_INTERVAL_SECONDS
+            prediction = predictions_collection.find_one({
+                "_id": ObjectId(prediction_id),
+                "user_id": ObjectId(user["_id"])
+            })
             validation_status = prediction.get("validation_status", "pending")
             prediction_status = prediction.get("prediction_status", "pending")
 
         # Check if tasks timed out
         if validation_status == "pending" or prediction_status == "pending":
-            logger.warning(f"Prediction {prediction_id} timed out waiting for tasks to complete")
-            raise HTTPException(status_code=408, detail="Request timed out waiting for validation and prediction to complete")
+            logger.warning(f"Prediction {prediction_id} timed out waiting for tasks to complete after {POLLING_TIMEOUT_SECONDS} seconds")
+            raise HTTPException(status_code=408, detail=f"Request timed out waiting for validation and prediction to complete after {POLLING_TIMEOUT_SECONDS} seconds")
 
         # Check if either task failed
         if validation_status == "failed":
@@ -206,10 +211,10 @@ async def get_prediction(prediction_id: str, user: dict = Depends(get_current_us
         overall_feedback2 = prediction["prediction2"].get("overall_feedback")
         
         prediction["prediction1"]["overall_feedback"] = (
-            float(overall_feedback1) if overall_feedback1 is not None and overall_feedback1 != "Not Provided" else 0.5
+            float(overall_feedback1) if overall_feedback1 is not None else 0.5
         )
         prediction["prediction2"]["overall_feedback"] = (
-            float(overall_feedback2) if overall_feedback2 is not None and overall_feedback2 != "Not Provided" else 0.5
+            float(overall_feedback2) if overall_feedback2 is not None else 0.5
         )
 
         prediction["prediction_id"] = prediction_id
@@ -231,14 +236,25 @@ async def submit_feedback(
     score: str = Form(...),
     user: dict = Depends(get_current_user),
 ):
-    if predictions_collection is None:
+    client = get_db_client()
+    if not client:
         logger.error("Database connection not available")
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
-    logger.info(f"Submitting feedback for prediction {prediction_id} for user {user['sub']}...")
+    logger.info(f"Submitting feedback for prediction {prediction_id} for user {user['_id']}...")
     start_time = datetime.now()
     try:
-        prediction = await predictions_collection.find_one({"_id": prediction_id, "user_id": user["sub"]})
+        # Check if '_id' exists in the user dictionary
+        if "_id" not in user:
+            logger.error("User dictionary missing '_id' field")
+            raise HTTPException(status_code=401, detail="Invalid token: User ID not found")
+
+        db = client["jewelify"]
+        predictions_collection = db["predictions"]
+        prediction = predictions_collection.find_one({
+            "_id": ObjectId(prediction_id),
+            "user_id": ObjectId(user["_id"])
+        })
         if not prediction:
             logger.warning(f"Prediction {prediction_id} not found for feedback")
             raise HTTPException(status_code=404, detail="Prediction not found")
@@ -278,8 +294,8 @@ async def submit_feedback(
             logger.warning(f"Invalid feedback type: {feedback_type}")
             raise HTTPException(status_code=400, detail="Invalid feedback type")
 
-        await predictions_collection.update_one(
-            {"_id": prediction_id}, {"$set": update_data}
+        predictions_collection.update_one(
+            {"_id": ObjectId(prediction_id)}, {"$set": update_data}
         )
         logger.info(f"Feedback for prediction {prediction_id} submitted in {(datetime.now() - start_time).total_seconds():.2f} seconds")
         return {"message": "Feedback submitted successfully"}

@@ -5,12 +5,15 @@ from dotenv import load_dotenv
 import logging
 from bson import ObjectId
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging based on environment
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+logging_level = logging.DEBUG if ENVIRONMENT == "development" else logging.WARNING
+logging.basicConfig(level=logging_level)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
-client = MongoClient(MONGO_URI)
+client = None
 
 def get_db_client():
     global client
@@ -22,6 +25,8 @@ def get_db_client():
         except Exception as e:
             logger.error(f"Failed to connect to MongoDB Atlas: {e}")
             client = None
+    else:
+        logger.debug("Reusing existing MongoDB client connection")
     return client
 
 def rebuild_client():

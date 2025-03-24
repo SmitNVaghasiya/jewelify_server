@@ -8,20 +8,17 @@ from typing import List, Tuple, Optional
 import asyncio
 from dotenv import load_dotenv
 import time
-from motor.motor_asyncio import AsyncIOMotorClient
+from services.database import get_db_client
+from bson import ObjectId
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging based on environment
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+logging_level = logging.DEBUG if ENVIRONMENT == "development" else logging.WARNING
+logging.basicConfig(level=logging_level, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# MongoDB client setup for updating prediction status
-mongo_uri = os.getenv("MONGO_URI")
-client = AsyncIOMotorClient(mongo_uri)
-db = client["jewelry_db"]
-predictions_collection = db["predictions"]
 
 class JewelryPredictor:
     def __init__(self, device: str = "CPU"):
@@ -139,6 +136,13 @@ class JewelryPredictor:
         return True, "Valid"
 
     async def validate_images(self, face_image: np.ndarray, jewelry_image: np.ndarray, prediction_id: str):
+        client = get_db_client()
+        if not client:
+            logger.error("Database connection not available")
+            return
+        db = client["jewelify"]
+        predictions_collection = db["predictions"]
+
         logger.info(f"Validating images for prediction {prediction_id}...")
         start_time = time.time()
         try:
@@ -146,8 +150,8 @@ class JewelryPredictor:
             is_valid_face, face_message = self.validate_face_image(face_image)
             if not is_valid_face:
                 logger.warning(f"Face image validation failed: {face_message}")
-                await predictions_collection.update_one(
-                    {"_id": prediction_id},
+                predictions_collection.update_one(
+                    {"_id": ObjectId(prediction_id)},
                     {"$set": {"validation_status": "failed"}}
                 )
                 return
@@ -156,22 +160,22 @@ class JewelryPredictor:
             is_valid_jewelry, jewelry_message = self.validate_image(jewelry_image)
             if not is_valid_jewelry:
                 logger.warning(f"Jewelry image validation failed: {jewelry_message}")
-                await predictions_collection.update_one(
-                    {"_id": prediction_id},
+                predictions_collection.update_one(
+                    {"_id": ObjectId(prediction_id)},
                     {"$set": {"validation_status": "failed"}}
                 )
                 return
 
             # Validation successful
-            await predictions_collection.update_one(
-                {"_id": prediction_id},
+            predictions_collection.update_one(
+                {"_id": ObjectId(prediction_id)},
                 {"$set": {"validation_status": "completed"}}
             )
             logger.info(f"Validation completed in {time.time() - start_time:.2f} seconds")
         except Exception as e:
             logger.error(f"Error during validation: {str(e)}")
-            await predictions_collection.update_one(
-                {"_id": prediction_id},
+            predictions_collection.update_one(
+                {"_id": ObjectId(prediction_id)},
                 {"$set": {"validation_status": "failed"}}
             )
 
@@ -223,21 +227,28 @@ class JewelryPredictor:
                 if isinstance(self.pairwise_features, dict):
                     distances = {key: np.linalg.norm(val - features) for key, val in self.pairwise_features.items()}
                     sorted_items = sorted(distances.items(), key=lambda x: x[1])[:top_k]
-                    for name, _ in sorted_items:
+                    max_distance = max(distances.values()) if distances else 1.0
+                    for name, distance in sorted_items:
+                        score = (1 - distance / max_distance) * 100  # Normalize score to 0-100
                         category_idx = self.jewelry_categories.index(name.split('_')[0]) if '_' in name else 0
                         recommendations.append({
                             "name": name,
                             "category": self.jewelry_categories[category_idx],
+                            "score": float(score),
                             "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{name.split('_')[-1]}.jpg",
                         })
                 else:
                     distances = np.linalg.norm(self.pairwise_features - features, axis=1)
                     top_k_indices = np.argsort(distances)[:top_k]
+                    max_distance = distances.max() if len(distances) > 0 else 1.0
                     for idx in top_k_indices:
-                        category_idx = int(distances[idx] % len(self.jewelry_categories))
+                        distance = distances[idx]
+                        score = (1 - distance / max_distance) * 100  # Normalize score to 0-100
+                        category_idx = int(distance % len(self.jewelry_categories))
                         recommendations.append({
                             "name": f"{self.jewelry_categories[category_idx]}_{idx}",
                             "category": self.jewelry_categories[category_idx],
+                            "score": float(score),
                             "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{idx}.jpg",
                         })
             else:
@@ -248,6 +259,7 @@ class JewelryPredictor:
             recommendations.append({
                 "name": f"fallback_xgboost_{len(recommendations)}",
                 "category": "Neutral",
+                "score": 0.0,
                 "display_url": "",
             })
         logger.info(f"XGBoost recommendations generated in {time.time() - start_time:.2f} seconds")
@@ -262,21 +274,28 @@ class JewelryPredictor:
                 if isinstance(self.pairwise_features, dict):
                     distances = {key: np.linalg.norm(val - features) for key, val in self.pairwise_features.items()}
                     sorted_items = sorted(distances.items(), key=lambda x: x[1])[:top_k]
-                    for name, _ in sorted_items:
+                    max_distance = max(distances.values()) if distances else 1.0
+                    for name, distance in sorted_items:
+                        score = (1 - distance / max_distance) * 100  # Normalize score to 0-100
                         category_idx = self.jewelry_categories.index(name.split('_')[0]) if '_' in name else 0
                         recommendations.append({
                             "name": name,
                             "category": self.jewelry_categories[category_idx],
+                            "score": float(score),
                             "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{name.split('_')[-1]}.jpg",
                         })
                 else:
                     distances = np.linalg.norm(self.pairwise_features - features, axis=1)
                     top_k_indices = np.argsort(distances)[:top_k]
+                    max_distance = distances.max() if len(distances) > 0 else 1.0
                     for idx in top_k_indices:
-                        category_idx = int(distances[idx] % len(self.jewelry_categories))
+                        distance = distances[idx]
+                        score = (1 - distance / max_distance) * 100  # Normalize score to 0-100
+                        category_idx = int(distance % len(self.jewelry_categories))
                         recommendations.append({
                             "name": f"{self.jewelry_categories[category_idx]}_{idx}",
                             "category": self.jewelry_categories[category_idx],
+                            "score": float(score),
                             "display_url": f"https://jewelify-server.onrender.com/static/images/{self.jewelry_categories[category_idx].lower()}_{idx}.jpg",
                         })
             else:
@@ -287,6 +306,7 @@ class JewelryPredictor:
             recommendations.append({
                 "name": f"fallback_mlp_{len(recommendations)}",
                 "category": "Neutral",
+                "score": 0.0,
                 "display_url": "",
             })
         logger.info(f"MLP recommendations generated in {time.time() - start_time:.2f} seconds")
@@ -300,6 +320,13 @@ class JewelryPredictor:
         jewelry_image_path: str,
         prediction_id: str,
     ) -> dict:
+        client = get_db_client()
+        if not client:
+            logger.error("Database connection not available")
+            return
+        db = client["jewelify"]
+        predictions_collection = db["predictions"]
+
         logger.info(f"Starting prediction for both models for prediction {prediction_id}...")
         start_time = time.time()
         try:
@@ -317,7 +344,7 @@ class JewelryPredictor:
             for i, task in enumerate(tasks):
                 if isinstance(task, asyncio.Future):
                     tasks[i] = asyncio.Future()
-                    tasks[i].set_result((50.0, "Neutral") if i < 2 else [{"name": f"fallback_{i}", "category": "Neutral", "display_url": ""} for _ in range(3)])
+                    tasks[i].set_result((50.0, "Neutral") if i < 2 else [{"name": f"fallback_{i}", "category": "Neutral", "score": 0.0, "display_url": ""} for _ in range(3)])
 
             results = await asyncio.gather(*tasks)
 
@@ -346,8 +373,8 @@ class JewelryPredictor:
             }
 
             # Update the database with the prediction result and status
-            await predictions_collection.update_one(
-                {"_id": prediction_id},
+            predictions_collection.update_one(
+                {"_id": ObjectId(prediction_id)},
                 {
                     "$set": {
                         "prediction1": prediction_result["prediction1"],
@@ -362,8 +389,8 @@ class JewelryPredictor:
             return prediction_result
         except Exception as e:
             logger.error(f"Error during prediction: {str(e)}")
-            await predictions_collection.update_one(
-                {"_id": prediction_id},
+            predictions_collection.update_one(
+                {"_id": ObjectId(prediction_id)},
                 {"$set": {"prediction_status": "failed"}}
             )
             raise

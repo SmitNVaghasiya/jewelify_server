@@ -9,15 +9,26 @@ from twilio.rest import Client
 from services.database import get_db_client
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # Load environment variables
 load_dotenv()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.getenv("SECRET_KEY", "default-secret-key")
-ALGORITHM = "HS256"
+
+# Configure logging based on environment
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+logging_level = logging.DEBUG if ENVIRONMENT == "development" else logging.WARNING
+logging.basicConfig(level=logging_level, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# JWT settings
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not JWT_SECRET_KEY:
+    logger.error("JWT_SECRET_KEY environment variable not set")
+    raise ValueError("JWT_SECRET_KEY environment variable not set")
+
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+if JWT_ALGORITHM not in ["HS256", "HS384", "HS512"]:
+    logger.error(f"Invalid JWT_ALGORITHM: {JWT_ALGORITHM}. Must be one of HS256, HS384, or HS512")
+    raise ValueError(f"Invalid JWT_ALGORITHM: {JWT_ALGORITHM}. Must be one of HS256, HS384, or HS512")
+
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 43200))
 
 # Twilio configuration
@@ -25,36 +36,60 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 
-# Initialize Twilio client
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+# Initialize Twilio client (only if Twilio credentials are provided)
+twilio_client = None
+if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER:
+    try:
+        twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        logger.info("Twilio client initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Twilio client: {str(e)}")
+        twilio_client = None
+else:
+    logger.warning("Twilio credentials not provided. SMS functionality will be disabled.")
 
 # OTP settings
 OTP_LENGTH = 6
 OTP_EXPIRY_MINUTES = 5
 
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 def hash_password(password: str) -> str:
+    """Hash a password using bcrypt."""
+    logger.debug(f"Hashing password for user")
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a plain password against a hashed password."""
+    logger.debug("Verifying password")
     return pwd_context.verify(plain_password, hashed_password)
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
+def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
+    """Create a JWT access token."""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.now() + expires_delta
+        expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.now() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    logger.debug(f"Created JWT token with expiration: {expire}")
     return encoded_jwt
 
 def generate_otp(length: int = OTP_LENGTH) -> str:
     """Generate a random OTP of specified length."""
     digits = string.digits
-    return ''.join(random.choice(digits) for _ in range(length))
+    otp = ''.join(random.choice(digits) for _ in range(length))
+    logger.debug(f"Generated OTP: {otp}")
+    return otp
 
 def send_otp_via_sms(mobile_no: str, otp: str) -> bool:
     """Send OTP to the given mobile number via SMS using Twilio."""
+    if not twilio_client:
+        logger.error("Twilio client not initialized. Cannot send OTP.")
+        return False
+
     try:
         message = twilio_client.messages.create(
             body=f"Your OTP for Jewelify is {otp}. It is valid for {OTP_EXPIRY_MINUTES} minutes.",
@@ -64,7 +99,7 @@ def send_otp_via_sms(mobile_no: str, otp: str) -> bool:
         logger.info(f"OTP sent to {mobile_no}: {message.sid}")
         return True
     except Exception as e:
-        logger.error(f"Failed to send OTP to {mobile_no}: {e}")
+        logger.error(f"Failed to send OTP to {mobile_no}: {str(e)}")
         return False
 
 def store_otp(mobile_no: str, otp: str) -> bool:
@@ -88,7 +123,7 @@ def store_otp(mobile_no: str, otp: str) -> bool:
         logger.info(f"OTP stored for {mobile_no}")
         return True
     except Exception as e:
-        logger.error(f"Error storing OTP for {mobile_no}: {e}")
+        logger.error(f"Error storing OTP for {mobile_no}: {str(e)}")
         return False
 
 def verify_otp(mobile_no: str, otp: str) -> bool:
@@ -119,5 +154,5 @@ def verify_otp(mobile_no: str, otp: str) -> bool:
         logger.info(f"OTP verified for {mobile_no}")
         return True
     except Exception as e:
-        logger.error(f"Error verifying OTP for {mobile_no}: {e}")
+        logger.error(f"Error verifying OTP for {mobile_no}: {str(e)}")
         return False
