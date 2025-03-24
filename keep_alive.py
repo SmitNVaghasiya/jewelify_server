@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Use the app's own health check endpoint to keep the server alive
 # Replace with your Render URL or use an environment variable
-KEEP_ALIVE_URL = "http://localhost:8000/health"
+KEEP_ALIVE_URL = "https://jewelify-server.onrender.com/health"
 # Interval for keep-alive pings (14 minutes = 840 seconds)
 KEEP_ALIVE_INTERVAL = 840
 # Number of retries for failed pings
