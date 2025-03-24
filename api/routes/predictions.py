@@ -107,14 +107,14 @@ async def predict(
         prediction_data = {
             "prediction1": {
                 "score": 0.0,
-                "category": "Neutral",
+                "category": "Not Assigned",
                 "recommendations": [],
                 "feedback_required": True,
                 "overall_feedback": 0.5
             },
             "prediction2": {
                 "score": 0.0,
-                "category": "Neutral",
+                "category": "Not Assigned",
                 "recommendations": [],
                 "feedback_required": True,
                 "overall_feedback": 0.5
@@ -147,6 +147,12 @@ async def predict(
             if isinstance(result, Exception):
                 logger.error(f"Task {i} (validation or prediction) failed with exception: {str(result)}")
                 raise HTTPException(status_code=500, detail=f"Task failed: {str(result)}")
+
+        # Check validation result
+        validation_success = results[0]
+        if not validation_success:
+            logger.warning(f"Prediction {prediction_id} failed validation")
+            raise HTTPException(status_code=400, detail="Validation failed: Ensure a face is visible and jewelry is clear.")
 
         logger.info(f"Prediction {prediction_id}: Both successfully completed")
 
@@ -277,6 +283,26 @@ async def submit_feedback(
             logger.error("User dictionary missing '_id' field")
             raise HTTPException(status_code=401, detail="Invalid token: User ID not found")
 
+        # Validate feedback type
+        if feedback_type not in ["prediction", "recommendation"]:
+            logger.warning(f"Invalid feedback type: {feedback_type}")
+            raise HTTPException(status_code=400, detail="Invalid feedback type")
+
+        # Validate model type
+        if model_type not in ["prediction1", "prediction2"]:
+            logger.warning(f"Invalid model type: {model_type}")
+            raise HTTPException(status_code=400, detail="Invalid model type")
+
+        # Validate score
+        try:
+            score_float = float(score)
+            if not 0 <= score_float <= 1:
+                raise ValueError("Score must be between 0 and 1")
+        except ValueError as e:
+            logger.warning(f"Invalid score value: {score}")
+            raise HTTPException(status_code=400, detail=f"Invalid score: {str(e)}")
+
+        # Check if prediction exists
         db = client["jewelify"]
         predictions_collection = db["predictions"]
         prediction = predictions_collection.find_one({
@@ -287,44 +313,27 @@ async def submit_feedback(
             logger.warning(f"Prediction {prediction_id} not found for feedback")
             raise HTTPException(status_code=404, detail="Prediction not found")
 
-        update_data = {}
-        if feedback_type == "prediction":
-            try:
-                score_float = float(score)
-                if not 0 <= score_float <= 1:
-                    raise ValueError("Score must be between 0 and 1")
-                update_data[f"{model_type}.overall_feedback"] = score_float
-                update_data[f"{model_type}.feedback_required"] = False
-            except ValueError as e:
-                logger.warning(f"Invalid score value: {score}")
-                raise HTTPException(status_code=400, detail=f"Invalid score: {str(e)}")
-        elif feedback_type == "recommendation":
-            if not recommendation_name:
-                logger.warning("Recommendation name missing for feedback")
-                raise HTTPException(status_code=400, detail="Recommendation name is required")
-            try:
-                score_float = float(score)
-                if not 0 <= score_float <= 1:
-                    raise ValueError("Score must be between 0 and 1")
-                recommendations = prediction[model_type]["recommendations"]
-                for rec in recommendations:
-                    if rec["name"] == recommendation_name:
-                        rec["feedback"] = score_float
-                        break
-                else:
-                    logger.warning(f"Recommendation {recommendation_name} not found in {model_type}")
-                    raise HTTPException(status_code=400, detail="Recommendation not found")
-                update_data[f"{model_type}.recommendations"] = recommendations
-            except ValueError as e:
-                logger.warning(f"Invalid score value: {score}")
-                raise HTTPException(status_code=400, detail=f"Invalid score: {str(e)}")
-        else:
-            logger.warning(f"Invalid feedback type: {feedback_type}")
-            raise HTTPException(status_code=400, detail="Invalid feedback type")
-
-        predictions_collection.update_one(
-            {"_id": ObjectId(prediction_id)}, {"$set": update_data}
+        # Save feedback to the reviews collection
+        from services.database import save_review
+        success = save_review(
+            user_id=str(user["_id"]),
+            prediction_id=prediction_id,
+            model_type=model_type,
+            recommendation_name=recommendation_name,
+            score=score_float,
+            feedback_type=feedback_type
         )
+        if not success:
+            logger.error("Failed to save feedback to database")
+            raise HTTPException(status_code=500, detail="Failed to save feedback")
+
+        # Update feedback_required field if feedback_type is "prediction"
+        if feedback_type == "prediction":
+            predictions_collection.update_one(
+                {"_id": ObjectId(prediction_id)},
+                {"$set": {f"{model_type}.feedback_required": False}}
+            )
+
         logger.info(f"Feedback for prediction {prediction_id} submitted in {(datetime.now() - start_time).total_seconds():.2f} seconds")
         return {"message": "Feedback submitted successfully"}
     except HTTPException as e:

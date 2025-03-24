@@ -53,7 +53,7 @@ def save_prediction(prediction_data: dict, user_id: str):
 
     try:
         db = client["jewelify"]
-        collection = db["recommendations"]
+        collection = db["predictions"]  # Updated to match predictions.py
 
         prediction = {
             "user_id": ObjectId(user_id),
@@ -82,7 +82,7 @@ def get_prediction_by_id(prediction_id, user_id):
 
     try:
         db = client["jewelify"]
-        predictions_collection = db["recommendations"]
+        predictions_collection = db["predictions"]
         reviews_collection = db["reviews"]
 
         prediction = predictions_collection.find_one({
@@ -152,14 +152,14 @@ def get_prediction_by_id(prediction_id, user_id):
             "user_id": str(prediction["user_id"]),
             "prediction1": {
                 "score": prediction["prediction1"].get("score", 0.0),
-                "category": prediction["prediction1"].get("category", "Neutral"),
+                "category": prediction["prediction1"].get("category", "Not Assigned"),
                 "recommendations": prediction["prediction1"].get("recommendations", []),
                 "overall_feedback": overall_feedback["prediction1"],
                 "feedback_required": prediction["prediction1"].get("feedback_required", True)
             },
             "prediction2": {
                 "score": prediction["prediction2"].get("score", 0.0),
-                "category": prediction["prediction2"].get("category", "Neutral"),
+                "category": prediction["prediction2"].get("category", "Not Assigned"),
                 "recommendations": prediction["prediction2"].get("recommendations", []),
                 "overall_feedback": overall_feedback["prediction2"],
                 "feedback_required": prediction["prediction2"].get("feedback_required", True)
