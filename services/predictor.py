@@ -20,6 +20,9 @@ logging_level = logging.DEBUG if ENVIRONMENT == "development" else logging.WARNI
 logging.basicConfig(level=logging_level, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Reduce pymongo logging to INFO to avoid excessive debug logs
+logging.getLogger("pymongo").setLevel(logging.INFO)
+
 class JewelryPredictor:
     def __init__(self, device: str = "CPU"):
         self.device = device
@@ -173,11 +176,12 @@ class JewelryPredictor:
             )
             logger.info(f"Validation completed in {time.time() - start_time:.2f} seconds")
         except Exception as e:
-            logger.error(f"Error during validation: {str(e)}")
+            logger.error(f"Error during validation for prediction {prediction_id}: {str(e)}")
             predictions_collection.update_one(
                 {"_id": ObjectId(prediction_id)},
                 {"$set": {"validation_status": "failed"}}
             )
+            raise  # Re-raise the exception to ensure it's logged in the calling function
 
     def extract_features(self, image: np.ndarray) -> np.ndarray:
         logger.info("Extracting features...")
@@ -346,7 +350,17 @@ class JewelryPredictor:
                     tasks[i] = asyncio.Future()
                     tasks[i].set_result((50.0, "Neutral") if i < 2 else [{"name": f"fallback_{i}", "category": "Neutral", "score": 0.0, "display_url": ""} for _ in range(3)])
 
-            results = await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Check for exceptions in the tasks
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(f"Task {i} failed with exception: {str(result)}")
+                    predictions_collection.update_one(
+                        {"_id": ObjectId(prediction_id)},
+                        {"$set": {"prediction_status": "failed"}}
+                    )
+                    raise result
 
             xgboost_confidence, xgboost_category = results[0]
             mlp_confidence, mlp_category = results[1]
@@ -388,7 +402,7 @@ class JewelryPredictor:
             logger.info(f"Prediction for both models completed in {time.time() - start_time:.2f} seconds")
             return prediction_result
         except Exception as e:
-            logger.error(f"Error during prediction: {str(e)}")
+            logger.error(f"Error during prediction for prediction {prediction_id}: {str(e)}")
             predictions_collection.update_one(
                 {"_id": ObjectId(prediction_id)},
                 {"$set": {"prediction_status": "failed"}}

@@ -20,6 +20,9 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 logging_level = logging.DEBUG if ENVIRONMENT == "development" else logging.WARNING
 logging.basicConfig(level=logging_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Reduce pymongo logging to WARNING to avoid excessive debug logs
+logging.getLogger("pymongo").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
@@ -58,6 +61,10 @@ async def predict(
     jewelry_image_path: str = Form(...),
     user: dict = Depends(get_current_user),
 ):
+    logger.info("Received POST request to /predictions/predict")
+    logger.info(f"User: {user}")
+    logger.info(f"Face image path: {face_image_path}, Jewelry image path: {jewelry_image_path}")
+
     # Initialize predictor per request to ensure thread-safety
     try:
         predictor = JewelryPredictor()
@@ -66,7 +73,6 @@ async def predict(
         logger.error(f"Failed to initialize JewelryPredictor: {str(e)}")
         raise HTTPException(status_code=500, detail="Predictor initialization failed")
 
-    logger.info("Received request to /predictions/predict")
     start_time = datetime.now()
     try:
         # Check if '_id' exists in the user dictionary
@@ -75,6 +81,7 @@ async def predict(
             raise HTTPException(status_code=401, detail="Invalid token: User ID not found")
 
         # Read and decode images
+        logger.info("Reading and decoding images...")
         face_contents = await face.read()
         jewelry_contents = await jewelry.read()
 
@@ -133,7 +140,14 @@ async def predict(
             predictor.predict_both(face_image, jewelry_image, face_image_path, jewelry_image_path, prediction_id)
         )
         logger.info("Waiting for tasks to complete...")
-        await asyncio.gather(validation_task, prediction_task)
+        results = await asyncio.gather(validation_task, prediction_task, return_exceptions=True)
+
+        # Check for exceptions in the tasks
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Task {i} (validation or prediction) failed with exception: {str(result)}")
+                raise HTTPException(status_code=500, detail=f"Task failed: {str(result)}")
+
         logger.info(f"Prediction {prediction_id}: Both successfully completed")
 
         logger.info(f"Prediction request completed in {(datetime.now() - start_time).total_seconds():.2f} seconds")
