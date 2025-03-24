@@ -19,6 +19,7 @@ load_dotenv()
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 logging_level = logging.DEBUG if ENVIRONMENT == "development" else logging.WARNING
 logging.basicConfig(level=logging_level, format='%(asctime)s - %(levelname)s - %(message)s')
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
@@ -123,16 +124,17 @@ async def predict(
         logger.info(f"Prediction ID {prediction_id} saved")
 
         # Run validation and prediction tasks concurrently
-        logger.info("Starting validation task...")
+        logger.info(f"Prediction {prediction_id}: Validation started")
         validation_task = asyncio.create_task(
             predictor.validate_images(face_image, jewelry_image, prediction_id)
         )
-        logger.info("Starting prediction task...")
+        logger.info(f"Prediction {prediction_id}: Prediction started")
         prediction_task = asyncio.create_task(
             predictor.predict_both(face_image, jewelry_image, face_image_path, jewelry_image_path, prediction_id)
         )
         logger.info("Waiting for tasks to complete...")
         await asyncio.gather(validation_task, prediction_task)
+        logger.info(f"Prediction {prediction_id}: Both successfully completed")
 
         logger.info(f"Prediction request completed in {(datetime.now() - start_time).total_seconds():.2f} seconds")
         return {
@@ -202,14 +204,14 @@ async def get_prediction(prediction_id: str, user: dict = Depends(get_current_us
             logger.warning(f"Prediction {prediction_id} failed prediction")
             raise HTTPException(status_code=500, detail="Failed prediction")
 
-        # Both tasks completed successfully, return the prediction
+        # Both tasks completed successfully, prepare the prediction response
         # Ensure feedback scores default to 0.5 if not provided or invalid
         prediction["prediction1"] = prediction.get("prediction1", {})
         prediction["prediction2"] = prediction.get("prediction2", {})
-        
+
         overall_feedback1 = prediction["prediction1"].get("overall_feedback")
         overall_feedback2 = prediction["prediction2"].get("overall_feedback")
-        
+
         prediction["prediction1"]["overall_feedback"] = (
             float(overall_feedback1) if overall_feedback1 is not None else 0.5
         )
@@ -217,9 +219,21 @@ async def get_prediction(prediction_id: str, user: dict = Depends(get_current_us
             float(overall_feedback2) if overall_feedback2 is not None else 0.5
         )
 
-        prediction["prediction_id"] = prediction_id
-        logger.info(f"Prediction {prediction_id} fetched in {(datetime.now() - start_time).total_seconds():.2f} seconds")
-        return prediction
+        # Convert ObjectId fields to strings for JSON serialization
+        result = {
+            "prediction_id": str(prediction["_id"]),
+            "user_id": str(prediction["user_id"]),
+            "prediction1": prediction["prediction1"],
+            "prediction2": prediction["prediction2"],
+            "face_image_path": prediction.get("face_image_path"),
+            "jewelry_image_path": prediction.get("jewelry_image_path"),
+            "timestamp": prediction.get("timestamp"),
+            "validation_status": prediction.get("validation_status"),
+            "prediction_status": prediction.get("prediction_status")
+        }
+
+        logger.info(f"Prediction {prediction_id}: Get prediction successfully returned in {(datetime.now() - start_time).total_seconds():.2f} seconds")
+        return result
     except HTTPException as e:
         logger.error(f"HTTP error during prediction fetch: {str(e)}")
         raise e

@@ -146,6 +146,7 @@ def get_prediction_by_id(prediction_id, user_id):
                 for rec in prediction[model_type]["recommendations"]:
                     rec["liked"] = rec["name"] in liked[model_type]
 
+        # Convert ObjectId fields to strings
         result = {
             "id": str(prediction["_id"]),
             "user_id": str(prediction["user_id"]),
