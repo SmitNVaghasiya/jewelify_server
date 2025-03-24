@@ -53,7 +53,7 @@ def save_prediction(prediction_data: dict, user_id: str):
 
     try:
         db = client["jewelify"]
-        collection = db["predictions"]  # Updated to match predictions.py
+        collection = db["predictions"]
 
         prediction = {
             "user_id": ObjectId(user_id),

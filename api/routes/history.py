@@ -17,7 +17,7 @@ async def get_user_history(
 
     try:
         db = client["jewelify"]
-        predictions_collection = db["recommendations"]
+        predictions_collection = db["predictions"]  # Updated to match the correct collection
         reviews_collection = db["reviews"]
         predictions = list(predictions_collection.find({"user_id": ObjectId(current_user["_id"])}).sort("timestamp", -1).skip(skip).limit(limit))
     except Exception as e:
@@ -60,8 +60,8 @@ async def get_user_history(
         overall_feedback["prediction2"] = float(overall_feedback["prediction2"]) if overall_feedback["prediction2"] is not None else 0.5
 
         # Process recommendations for each model
-        xgboost_recs = pred.get("xgboost_recommendations", [])
-        mlp_recs = pred.get("mlp_recommendations", [])
+        xgboost_recs = pred.get("prediction1", {}).get("recommendations", [])
+        mlp_recs = pred.get("prediction2", {}).get("recommendations", [])
 
         # Apply feedback scores to recommendations
         for rec in xgboost_recs:
@@ -104,15 +104,15 @@ async def get_user_history(
             "id": prediction_id,
             "user_id": str(pred["user_id"]),
             "prediction1": {
-                "score": pred["xgboost_score"],
-                "category": pred["xgboost_category"],
+                "score": pred.get("prediction1", {}).get("score", 0.0),
+                "category": pred.get("prediction1", {}).get("category", "Not Assigned"),
                 "recommendations": xgboost_display,
                 "overall_feedback": overall_feedback["prediction1"],
                 "feedback_required": "Overall feedback for prediction1 is required" if overall_feedback["prediction1"] == 0.5 else None
             },
             "prediction2": {
-                "score": pred["mlp_score"],
-                "category": pred["mlp_category"],
+                "score": pred.get("prediction2", {}).get("score", 0.0),
+                "category": pred.get("prediction2", {}).get("category", "Not Assigned"),
                 "recommendations": mlp_display,
                 "overall_feedback": overall_feedback["prediction2"],
                 "feedback_required": "Overall feedback for prediction2 is required" if overall_feedback["prediction2"] == 0.5 else None

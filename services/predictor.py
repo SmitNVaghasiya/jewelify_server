@@ -12,6 +12,7 @@ from services.database import get_db_client
 from bson import ObjectId
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
+import urllib.parse  # For URL encoding
 
 # Load environment variables from .env file
 load_dotenv()
@@ -197,7 +198,7 @@ class JewelryPredictor:
                 {"_id": ObjectId(prediction_id)},
                 {"$set": {"validation_status": "failed"}}
             )
-            raise  # Re-raise the exception to ensure it's logged in the calling function
+            raise
 
     def extract_features(self, image: np.ndarray) -> np.ndarray:
         logger.info("Extracting features...")
@@ -238,7 +239,7 @@ class JewelryPredictor:
         logger.info(f"MLP prediction completed in {time.time() - start_time:.2f} seconds")
         return confidence, category
 
-    async def get_recommendations_with_xgboost(self, category: str, top_k: int = 3) -> List[dict]:
+    async def get_recommendations_with_xgboost(self, category: str, top_k: int = 10) -> List[dict]:
         logger.info("Getting XGBoost recommendations...")
         start_time = time.time()
         recommendations = []
@@ -247,13 +248,18 @@ class JewelryPredictor:
                 logger.warning(f"Category {category} not in jewelry_categories, using fallback")
                 category = "Not Assigned"
 
-            # Generate recommendations based on the predicted category
+            # Generate 10 recommendations based on the predicted category
             for i in range(top_k):
+                # Encode the URL to handle spaces and special characters
+                base_url = "https://jewelify-images.s3.eu-north-1.amazonaws.com/Necklace with earings_sorted_jpg/"
+                file_name = f"Necklace with earings_{i}.jpg"
+                encoded_file_name = urllib.parse.quote(file_name)
+                display_url = f"{base_url}{encoded_file_name}"
                 recommendations.append({
                     "name": f"{category}_xgboost_{i}",
                     "category": category,
-                    "score": float(100 - i * 10),  # Example scoring
-                    "display_url": f"https://jewelify-server.onrender.com/static/images/{category.lower().replace(' ', '_')}_{i}.jpg",
+                    "score": float(100 - i * 5),  # Adjusted scoring for 10 items
+                    "display_url": display_url,
                 })
         except Exception as e:
             logger.error(f"Error generating XGBoost recommendations: {str(e)}. Returning empty recommendations.")
@@ -268,7 +274,7 @@ class JewelryPredictor:
         logger.info(f"XGBoost recommendations generated in {time.time() - start_time:.2f} seconds")
         return recommendations
 
-    async def get_recommendations_with_mlp(self, category: str, top_k: int = 3) -> List[dict]:
+    async def get_recommendations_with_mlp(self, category: str, top_k: int = 10) -> List[dict]:
         logger.info("Getting MLP recommendations...")
         start_time = time.time()
         recommendations = []
@@ -277,13 +283,18 @@ class JewelryPredictor:
                 logger.warning(f"Category {category} not in jewelry_categories, using fallback")
                 category = "Not Assigned"
 
-            # Generate recommendations based on the predicted category
+            # Generate 10 recommendations based on the predicted category
             for i in range(top_k):
+                # Encode the URL to handle spaces and special characters
+                base_url = "https://jewelify-images.s3.eu-north-1.amazonaws.com/Necklace with earings_sorted_jpg/"
+                file_name = f"Necklace with earings_{i}.jpg"
+                encoded_file_name = urllib.parse.quote(file_name)
+                display_url = f"{base_url}{encoded_file_name}"
                 recommendations.append({
                     "name": f"{category}_mlp_{i}",
                     "category": category,
-                    "score": float(100 - i * 10),  # Example scoring
-                    "display_url": f"https://jewelify-server.onrender.com/static/images/{category.lower().replace(' ', '_')}_{i}.jpg",
+                    "score": float(100 - i * 5),  # Adjusted scoring for 10 items
+                    "display_url": display_url,
                 })
         except Exception as e:
             logger.error(f"Error generating MLP recommendations: {str(e)}. Returning empty recommendations.")
@@ -349,8 +360,8 @@ class JewelryPredictor:
             mlp_confidence, mlp_category = mlp_result
 
             # Run recommendation tasks based on predicted categories
-            xgboost_rec_task = self.get_recommendations_with_xgboost(xgboost_category)
-            mlp_rec_task = self.get_recommendations_with_mlp(mlp_category)
+            xgboost_rec_task = self.get_recommendations_with_xgboost(xgboost_category, top_k=10)
+            mlp_rec_task = self.get_recommendations_with_mlp(mlp_category, top_k=10)
 
             xgboost_recommendations, mlp_recommendations = await asyncio.gather(xgboost_rec_task, mlp_rec_task, return_exceptions=True)
 
