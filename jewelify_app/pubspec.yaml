@@ -1,0 +1,66 @@
+name: jewelify
+description: "A new Flutter project."
+publish_to: "none"
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.3.0
+  provider: ^6.1.2
+  http_parser: ^4.1.2
+  image_picker: ^1.1.2
+  flutter_secure_storage: ^9.0.0
+  transparent_image: ^2.0.1
+  cached_network_image: ^3.4.1
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.5.2
+  path_provider: ^2.1.5
+  permission_handler: ^11.4.0
+  photo_view: ^0.15.0
+  easy_image_viewer: ^1.5.1
+  flutter_launcher_icons: ^0.14.3
+  google_ml_kit: ^0.19.0
+  smooth_page_indicator: ^1.2.1
+  image: ^4.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_native_splash: ^2.4.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/fonts/
+    - assets/images/login_illustration.png
+    - assets/logo.png
+
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
+    - family: NotoColorEmoji
+      fonts:
+        - asset: assets/fonts/NotoColorEmoji-Regular.ttf
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/logo.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/logo.png"
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/logo.png
+  android: true
+  ios: true

@@ -1,0 +1,4 @@
+-- in history_screen i have to change the name of the database name to recommendations form only recommendation 
+as it is causing the error of not showing the images.
+
+--
